@@ -4,3 +4,44 @@
 # OS-generated
 .DS_Store
 .DS_Store?
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+
+# Node / Frontend
+webapp/frontend/node_modules/
+webapp/frontend/dist/
+webapp/frontend/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Audio temp files & samples (downloaded/generated, not tracked in git)
+*.tmp.wav
+uploads/
+voxmachinae/samples/*.mp3
+voxmachinae/samples/*.ogg
+voxmachinae/samples/*.wav
+voxmachinae/samples/catalog.json
+
+# Firebase
+firebase-debug.log
+
+# MkDocs build
+site/
