@@ -1,0 +1,6 @@
+# Secrets
+.env.local
+
+# OS-generated
+.DS_Store
+.DS_Store?
