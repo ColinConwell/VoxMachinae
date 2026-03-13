@@ -237,10 +237,12 @@ def add_sample(
 
 
 def generate_test_samples(samples_dir: Path | None = None) -> list[Path]:
-    """Generate basic synthetic test samples for development/testing.
+    """Generate a single synthetic non-vocal test sample for development/testing.
 
-    Creates simple synthesized audio files useful for testing effects
-    without needing real vocal recordings.
+    Creates a pure sine wave sample that contains no vocal content. This serves
+    as a test case for verifying how effects handle non-vocal input. All other
+    samples in the library should contain actual vocal content (downloaded from
+    Freesound or generated via Suno).
 
     Returns:
         List of paths to generated files.
@@ -254,7 +256,9 @@ def generate_test_samples(samples_dir: Path | None = None) -> list[Path]:
     generated: list[Path] = []
     sr = 44100
 
-    # 1. Pure sine wave (A4 = 440Hz, 3 seconds)
+    # Pure sine wave (A4 = 440Hz, 3 seconds) — non-vocal test case.
+    # This is intentionally the only non-vocal sample in the library, kept
+    # to verify that effects degrade gracefully on non-vocal input.
     t = np.linspace(0, 3.0, int(3.0 * sr), endpoint=False)
     sine_440 = np.sin(2 * np.pi * 440 * t).astype(np.float32) * 0.8
     path = save_audio(
@@ -263,79 +267,19 @@ def generate_test_samples(samples_dir: Path | None = None) -> list[Path]:
     )
     generated.append(path)
 
-    # 2. Vibrato tone (simulates vocal vibrato)
-    vibrato_rate = 5.5  # Hz
-    vibrato_depth = 15  # cents
-    freq_mod = 440 * 2 ** (vibrato_depth / 1200 * np.sin(2 * np.pi * vibrato_rate * t))
-    phase = np.cumsum(2 * np.pi * freq_mod / sr)
-    vibrato = np.sin(phase).astype(np.float32) * 0.8
-    path = save_audio(
-        AudioBuffer(vibrato, sr, "vibrato_tone"),
-        samples_dir / "vibrato_tone.wav",
+    # Update catalog
+    _update_catalog(
+        samples_dir,
+        SampleInfo(
+            name="sine_440hz",
+            filename="sine_440hz.wav",
+            description="Pure 440 Hz sine wave — non-vocal test case for verifying effect behavior on non-vocal input",
+            category="synthetic",
+            sample_rate=sr,
+            license="CC0",
+            tags=["synthetic", "test", "non_vocal_test", "test_case", "sine"],
+        ),
     )
-    generated.append(path)
-
-    # 3. Ascending scale (C4 to C5, quarter-second per note)
-    notes = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25]
-    scale_data = []
-    for freq in notes:
-        t_note = np.linspace(0, 0.4, int(0.4 * sr), endpoint=False)
-        # Apply envelope to avoid clicks
-        env = np.minimum(t_note / 0.02, 1.0) * np.minimum((0.4 - t_note) / 0.02, 1.0)
-        note = np.sin(2 * np.pi * freq * t_note) * env
-        scale_data.append(note)
-    scale_audio = np.concatenate(scale_data).astype(np.float32) * 0.8
-    path = save_audio(
-        AudioBuffer(scale_audio, sr, "ascending_scale_c4_c5"),
-        samples_dir / "ascending_scale_c4_c5.wav",
-    )
-    generated.append(path)
-
-    # 4. Noise burst (for vocoder carrier testing)
-    noise = np.random.randn(int(2.0 * sr)).astype(np.float32) * 0.3
-    path = save_audio(
-        AudioBuffer(noise, sr, "white_noise"),
-        samples_dir / "white_noise.wav",
-    )
-    generated.append(path)
-
-    # 5. Formant-like vowel synthesis (simplified)
-    t = np.linspace(0, 2.0, int(2.0 * sr), endpoint=False)
-    # Approximate "ah" vowel with harmonics
-    fundamental = 150.0
-    signal = np.zeros_like(t)
-    for harmonic in range(1, 20):
-        freq = fundamental * harmonic
-        if freq > sr / 2:
-            break
-        # Rough formant shaping
-        amp = 1.0 / harmonic
-        if 500 < freq < 1200:
-            amp *= 3.0  # First formant boost
-        elif 2000 < freq < 3000:
-            amp *= 2.0  # Second formant boost
-        signal += amp * np.sin(2 * np.pi * freq * t)
-    signal = (signal / np.abs(signal).max() * 0.7).astype(np.float32)
-    path = save_audio(
-        AudioBuffer(signal, sr, "synthetic_vowel_ah"),
-        samples_dir / "synthetic_vowel_ah.wav",
-    )
-    generated.append(path)
-
-    # Update catalog for all generated samples
-    for p in generated:
-        _update_catalog(
-            samples_dir,
-            SampleInfo(
-                name=p.stem,
-                filename=p.name,
-                description=f"Synthetic test sample: {p.stem}",
-                category="synthetic",
-                sample_rate=sr,
-                license="CC0",
-                tags=["synthetic", "test"],
-            ),
-        )
 
     return generated
 
