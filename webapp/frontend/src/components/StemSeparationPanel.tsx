@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react'
+import { apiUrl } from '../lib/api'
+import { createDeterministicBars } from '../lib/animation'
 
 interface StemSeparationPanelProps {
   sessionId: string
@@ -6,6 +8,7 @@ interface StemSeparationPanelProps {
 }
 
 type ModelType = 'htdemucs' | 'htdemucs_ft'
+type StemType = 'vocals' | 'drums' | 'bass' | 'other'
 
 const MODEL_INFO: Record<ModelType, { label: string; description: string }> = {
   htdemucs: {
@@ -18,8 +21,11 @@ const MODEL_INFO: Record<ModelType, { label: string; description: string }> = {
   },
 }
 
+const STEM_BAR_VARIATION = createDeterministicBars(32, 4242)
+
 export function StemSeparationPanel({ sessionId, onProcessed }: StemSeparationPanelProps) {
   const [model, setModel] = useState<ModelType>('htdemucs')
+  const [stem, setStem] = useState<StemType>('vocals')
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<string | null>(null)
@@ -29,12 +35,14 @@ export function StemSeparationPanel({ sessionId, onProcessed }: StemSeparationPa
     setError(null)
     setProgress('Loading Demucs model...')
     try {
-      const res = await fetch('/api/process/separate', {
+      const res = await fetch(apiUrl('/api/process/separate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
+          engine: 'demucs_legacy',
           model,
+          stem,
         }),
       })
       if (!res.ok) {
@@ -49,7 +57,7 @@ export function StemSeparationPanel({ sessionId, onProcessed }: StemSeparationPa
     } finally {
       setProcessing(false)
     }
-  }, [sessionId, model, onProcessed])
+  }, [sessionId, model, onProcessed, stem])
 
   return (
     <div className="glass-card rounded-2xl border border-cyan-500/20 p-4 sm:p-6 space-y-5 sm:space-y-6 animate-fade-up">
@@ -63,14 +71,14 @@ export function StemSeparationPanel({ sessionId, onProcessed }: StemSeparationPa
           Stem Separation
         </h2>
         <span className="ml-auto rounded-full bg-cyan-500/10 border border-cyan-500/20 px-3 py-0.5 text-[10px] font-medium text-cyan-400/70">
-          Demucs
+          Demucs Legacy
         </span>
       </div>
 
       {/* Description */}
       <p className="text-sm text-zinc-500 leading-relaxed" style={{ fontFamily: 'var(--font-body)' }}>
-        Isolate vocals from the instrumental track using Meta&apos;s Demucs neural network.
-        The extracted vocal track replaces the processed output.
+        Isolate a specific stem using the current legacy Demucs backend while keeping the
+        API ready for newer separator engines. The extracted stem replaces the processed output.
       </p>
 
       {/* Model Selection */}
@@ -108,10 +116,35 @@ export function StemSeparationPanel({ sessionId, onProcessed }: StemSeparationPa
         </div>
       </div>
 
+      <div>
+        <label
+          className="mb-2.5 block text-[11px] font-semibold uppercase tracking-widest text-zinc-500"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          Target Stem
+        </label>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {(['vocals', 'drums', 'bass', 'other'] as const).map((stemName) => (
+            <button
+              key={stemName}
+              onClick={() => setStem(stemName)}
+              className={`rounded-xl px-3 py-2.5 text-xs font-semibold uppercase tracking-[0.18em] transition-all ${
+                stem === stemName
+                  ? 'border border-cyan-400/30 bg-cyan-500/15 text-cyan-200'
+                  : 'glass-card glass-card-hover text-zinc-500'
+              }`}
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              {stemName}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Stem visualization */}
       <div className="rounded-xl bg-white/[0.02] border border-white/[0.04] p-4">
         <div className="grid grid-cols-4 gap-3">
-          {(['vocals', 'drums', 'bass', 'other'] as const).map((stem) => {
+          {(['vocals', 'drums', 'bass', 'other'] as const).map((stemName, stemIndex) => {
             const colors: Record<string, string> = {
               vocals: 'bg-amber-500/60',
               drums: 'bg-rose-500/60',
@@ -119,19 +152,19 @@ export function StemSeparationPanel({ sessionId, onProcessed }: StemSeparationPa
               other: 'bg-zinc-500/60',
             }
             return (
-              <div key={stem} className="flex flex-col items-center gap-2">
+              <div key={stemName} className="flex flex-col items-center gap-2">
                 <div
-                  className={`h-12 w-full rounded-lg ${colors[stem]} ${
-                    stem === 'vocals' ? 'ring-2 ring-cyan-400/30 ring-offset-1 ring-offset-transparent' : 'opacity-30'
+                  className={`h-12 w-full rounded-lg ${colors[stemName]} ${
+                    stem === stemName ? 'ring-2 ring-cyan-400/30 ring-offset-1 ring-offset-transparent' : 'opacity-30'
                   } transition-all duration-300`}
                 >
                   <div className="flex h-full items-end justify-center gap-px p-1.5">
                     {Array.from({ length: 8 }, (_, i) => (
                       <div
                         key={i}
-                        className={`w-1 rounded-full ${stem === 'vocals' ? 'bg-white/70' : 'bg-white/30'}`}
+                        className={`w-1 rounded-full ${stem === stemName ? 'bg-white/70' : 'bg-white/30'}`}
                         style={{
-                          height: `${20 + Math.random() * 80}%`,
+                          height: `${20 + STEM_BAR_VARIATION[stemIndex * 8 + i] * 80}%`,
                           transition: 'height 0.3s',
                         }}
                       />
@@ -140,11 +173,11 @@ export function StemSeparationPanel({ sessionId, onProcessed }: StemSeparationPa
                 </div>
                 <span
                   className={`text-[10px] font-semibold uppercase tracking-wider ${
-                    stem === 'vocals' ? 'text-cyan-400' : 'text-zinc-600'
+                    stem === stemName ? 'text-cyan-400' : 'text-zinc-600'
                   }`}
                   style={{ fontFamily: 'var(--font-display)' }}
                 >
-                  {stem}
+                  {stemName}
                 </span>
               </div>
             )
@@ -154,7 +187,7 @@ export function StemSeparationPanel({ sessionId, onProcessed }: StemSeparationPa
           className="mt-3 text-center text-[10px] text-zinc-600"
           style={{ fontFamily: 'var(--font-body)' }}
         >
-          Extracts the vocal stem from the mix
+          Extracts the selected stem from the mix
         </p>
       </div>
 
@@ -180,7 +213,7 @@ export function StemSeparationPanel({ sessionId, onProcessed }: StemSeparationPa
         className="w-full rounded-xl bg-cyan-500/15 border border-cyan-500/30 py-3 text-sm font-semibold text-cyan-300 transition-all duration-200 hover:bg-cyan-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
         style={{ fontFamily: 'var(--font-display)' }}
       >
-        {processing ? 'Separating Stems...' : 'Extract Vocals'}
+        {processing ? 'Separating Stems...' : `Extract ${stem.charAt(0).toUpperCase()}${stem.slice(1)}`}
       </button>
     </div>
   )

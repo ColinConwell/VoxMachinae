@@ -17,6 +17,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { HelpTooltip, DSP_HELP } from './HelpTooltip'
+import { apiUrl } from '../lib/api'
 
 interface EffectNode {
   id: string
@@ -31,13 +32,14 @@ interface EffectsChainPanelProps {
   onProcessed: () => void
 }
 
-const EFFECT_COLORS: Record<string, { bg: string; border: string; text: string; dot: string; glow: string }> = {
+const EFFECT_COLORS: Record<string, { bg: string; border: string; text: string; dot: string; glow: string; menuHover: string }> = {
   autotune: {
     bg: 'bg-amber-500/10',
     border: 'border-amber-500/25',
     text: 'text-amber-300',
     dot: 'bg-amber-400',
     glow: 'shadow-[0_0_12px_rgba(251,191,36,0.12)]',
+    menuHover: 'hover:bg-amber-500/10',
   },
   vocoder: {
     bg: 'bg-violet-500/10',
@@ -45,6 +47,7 @@ const EFFECT_COLORS: Record<string, { bg: string; border: string; text: string; 
     text: 'text-violet-300',
     dot: 'bg-violet-400',
     glow: 'shadow-[0_0_12px_rgba(139,92,246,0.12)]',
+    menuHover: 'hover:bg-violet-500/10',
   },
   reverb: {
     bg: 'bg-rose-500/10',
@@ -52,6 +55,7 @@ const EFFECT_COLORS: Record<string, { bg: string; border: string; text: string; 
     text: 'text-rose-300',
     dot: 'bg-rose-400',
     glow: 'shadow-[0_0_12px_rgba(251,113,133,0.12)]',
+    menuHover: 'hover:bg-rose-500/10',
   },
   delay: {
     bg: 'bg-sky-500/10',
@@ -59,6 +63,7 @@ const EFFECT_COLORS: Record<string, { bg: string; border: string; text: string; 
     text: 'text-sky-300',
     dot: 'bg-sky-400',
     glow: 'shadow-[0_0_12px_rgba(56,189,248,0.12)]',
+    menuHover: 'hover:bg-sky-500/10',
   },
   formant: {
     bg: 'bg-teal-500/10',
@@ -66,6 +71,7 @@ const EFFECT_COLORS: Record<string, { bg: string; border: string; text: string; 
     text: 'text-teal-300',
     dot: 'bg-teal-400',
     glow: 'shadow-[0_0_12px_rgba(45,212,191,0.12)]',
+    menuHover: 'hover:bg-teal-500/10',
   },
   denoise: {
     bg: 'bg-lime-500/10',
@@ -73,6 +79,7 @@ const EFFECT_COLORS: Record<string, { bg: string; border: string; text: string; 
     text: 'text-lime-300',
     dot: 'bg-lime-400',
     glow: 'shadow-[0_0_12px_rgba(163,230,53,0.12)]',
+    menuHover: 'hover:bg-lime-500/10',
   },
 }
 
@@ -234,6 +241,7 @@ export function EffectsChainPanel({ sessionId, onProcessed }: EffectsChainPanelP
   const [chain, setChain] = useState<EffectNode[]>([])
   const [running, setRunning] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
+  const [runSummary, setRunSummary] = useState<{ ok: boolean; message: string } | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -242,7 +250,7 @@ export function EffectsChainPanel({ sessionId, onProcessed }: EffectsChainPanelP
 
   // Load chain on mount
   useEffect(() => {
-    fetch(`/api/chain/${sessionId}`)
+    fetch(apiUrl(`/api/chain/${sessionId}`))
       .then((r) => r.json())
       .then((data) => setChain(data.chain ?? []))
       .catch(() => {})
@@ -252,7 +260,7 @@ export function EffectsChainPanel({ sessionId, onProcessed }: EffectsChainPanelP
   const handleAdd = useCallback(async (effectType: string) => {
     setAddMenuOpen(false)
     try {
-      const resp = await fetch('/api/chain/add', {
+      const resp = await fetch(apiUrl('/api/chain/add'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -273,7 +281,7 @@ export function EffectsChainPanel({ sessionId, onProcessed }: EffectsChainPanelP
     const node = chain.find((n) => n.id === nodeId)
     if (!node) return
     try {
-      const resp = await fetch('/api/chain/update', {
+      const resp = await fetch(apiUrl('/api/chain/update'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -292,7 +300,7 @@ export function EffectsChainPanel({ sessionId, onProcessed }: EffectsChainPanelP
   // Remove
   const handleRemove = useCallback(async (nodeId: string) => {
     try {
-      const resp = await fetch(`/api/chain/${sessionId}/${nodeId}`, { method: 'DELETE' })
+      const resp = await fetch(apiUrl(`/api/chain/${sessionId}/${nodeId}`), { method: 'DELETE' })
       const data = await resp.json()
       setChain(data.chain)
     } catch (err) {
@@ -311,7 +319,7 @@ export function EffectsChainPanel({ sessionId, onProcessed }: EffectsChainPanelP
     setChain(reordered)
 
     try {
-      await fetch('/api/chain/reorder', {
+      await fetch(apiUrl('/api/chain/reorder'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -327,13 +335,32 @@ export function EffectsChainPanel({ sessionId, onProcessed }: EffectsChainPanelP
   // Run the full chain
   const handleRun = useCallback(async () => {
     setRunning(true)
+    setRunSummary(null)
     try {
-      const resp = await fetch(`/api/chain/run/${sessionId}`, { method: 'POST' })
+      const resp = await fetch(apiUrl(`/api/chain/run/${sessionId}`), { method: 'POST' })
       if (resp.ok) {
-        onProcessed()
+        const data = await resp.json()
+        if (data.effects_failed > 0) {
+          setRunSummary({
+            ok: false,
+            message: `${data.effects_succeeded}/${data.effects_attempted} effects ran successfully. Review failing nodes before exporting.`,
+          })
+        } else {
+          setRunSummary({
+            ok: true,
+            message: `Processed ${data.effects_succeeded} effect${data.effects_succeeded === 1 ? '' : 's'} successfully.`,
+          })
+        }
+        if (data.effects_succeeded > 0) {
+          onProcessed()
+        }
       }
     } catch (err) {
       console.error('Chain run failed:', err)
+      setRunSummary({
+        ok: false,
+        message: 'The chain could not be processed. Check the backend logs for more detail.',
+      })
     } finally {
       setRunning(false)
     }
@@ -386,7 +413,7 @@ export function EffectsChainPanel({ sessionId, onProcessed }: EffectsChainPanelP
                     <button
                       key={type}
                       onClick={() => handleAdd(type)}
-                      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:${c.bg}`}
+                      className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${c.menuHover}`}
                     >
                       <span className={`${c.text} text-base`}>{EFFECT_ICONS[type]}</span>
                       <span className="text-zinc-300 capitalize" style={{ fontFamily: 'var(--font-display)' }}>
@@ -438,6 +465,17 @@ export function EffectsChainPanel({ sessionId, onProcessed }: EffectsChainPanelP
 
       {/* Chain list */}
       <div className="px-6 pb-5">
+        {runSummary && (
+          <div
+            className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
+              runSummary.ok
+                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+            }`}
+          >
+            {runSummary.message}
+          </div>
+        )}
         {chain.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 text-center">
             <div className="text-3xl text-zinc-700 mb-3">◇</div>

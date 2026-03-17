@@ -1,12 +1,10 @@
 import { useEffect, useRef } from 'react'
+import { clampFrameDelta, lerp, preferredDevicePixelRatio } from '../../lib/animation'
+import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion'
 
 // Color constants
 const AMBER = { r: 251, g: 191, b: 36 }   // #FBBF24
 const VIOLET = { r: 139, g: 92, b: 246 }  // #8B5CF6
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t
-}
 
 function lerpColor(
   c1: typeof AMBER,
@@ -22,6 +20,7 @@ function lerpColor(
 
 export function WaveGrid() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const prefersReducedMotion = usePrefersReducedMotion()
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -33,9 +32,11 @@ export function WaveGrid() {
     let width = 0
     let height = 0
     let dpr = 1
+    let simTime = 0
+    let lastFrameTime = 0
 
     const resize = () => {
-      dpr = window.devicePixelRatio || 1
+      dpr = preferredDevicePixelRatio(window.devicePixelRatio || 1, prefersReducedMotion)
       width = window.innerWidth
       height = window.innerHeight
       canvas.width = width * dpr
@@ -142,6 +143,10 @@ export function WaveGrid() {
       )
 
     const draw = (time: number) => {
+      const delta = clampFrameDelta(time - lastFrameTime, prefersReducedMotion ? 20 : 32)
+      lastFrameTime = time
+      simTime += prefersReducedMotion ? 0 : delta
+
       ctx.clearRect(0, 0, width, height)
 
       // Dark background gradient
@@ -165,10 +170,10 @@ export function WaveGrid() {
           const gx = col * SPACING + gridOffsetX
           const gz = row * SPACING + gridOffsetZ
 
-          const waveY = getWaveHeight(gx, gz, time)
-          const colorT = getWaveNorm(gx, gz, time)
+          const waveY = getWaveHeight(gx, gz, simTime)
+          const colorT = getWaveNorm(gx, gz, simTime)
 
-          const p = project(gx, waveY, gz, time)
+          const p = project(gx, waveY, gz, simTime)
           if (p) {
             projected[row][col] = { ...p, colorT }
             if (p.depth < minDepth) minDepth = p.depth
@@ -282,13 +287,14 @@ export function WaveGrid() {
 
     resize()
     window.addEventListener('resize', resize)
+    lastFrameTime = performance.now()
     animationId = requestAnimationFrame(draw)
 
     return () => {
       cancelAnimationFrame(animationId)
       window.removeEventListener('resize', resize)
     }
-  }, [])
+  }, [prefersReducedMotion])
 
   return (
     <canvas

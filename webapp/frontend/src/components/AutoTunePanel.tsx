@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { HelpTooltip, DSP_HELP } from './HelpTooltip'
+import { apiUrl } from '../lib/api'
 
 interface AutoTunePanelProps {
   sessionId: string
@@ -40,7 +41,7 @@ export function AutoTunePanel({ sessionId, onProcessed }: AutoTunePanelProps) {
     setProcessing(true)
     setError(null)
     try {
-      const res = await fetch('/api/process/autotune', {
+      const res = await fetch(apiUrl('/api/process/autotune'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

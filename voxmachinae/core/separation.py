@@ -13,7 +13,7 @@ Model tiers:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -23,7 +23,31 @@ from voxmachinae.core.audio_io import AudioBuffer
 # Demucs stem names in standard order
 STEM_NAMES = ("drums", "bass", "other", "vocals")
 
+StemName = Literal["drums", "bass", "other", "vocals"]
+SeparationEngineName = Literal["demucs_legacy"]
 ModelName = Literal["htdemucs", "htdemucs_ft", "mdx_extra"]
+
+
+@dataclass(frozen=True)
+class SeparationBackend:
+    """Metadata describing an available source-separation backend."""
+
+    engine: SeparationEngineName
+    label: str
+    description: str
+    models: tuple[ModelName, ...]
+    stems: tuple[StemName, ...] = STEM_NAMES
+
+
+DEMUX_LEGACY_BACKEND = SeparationBackend(
+    engine="demucs_legacy",
+    label="Demucs Legacy",
+    description=(
+        "Archived Demucs backend kept for compatibility. Good for quick 4-stem separation, "
+        "but the API is structured so newer engines can be added."
+    ),
+    models=("htdemucs", "htdemucs_ft", "mdx_extra"),
+)
 
 
 @dataclass
@@ -68,8 +92,14 @@ def _to_stereo(audio: AudioBuffer) -> AudioBuffer:
     return AudioBuffer(data=stereo_data, sample_rate=audio.sample_rate, name=audio.name)
 
 
+def list_separation_backends() -> tuple[SeparationBackend, ...]:
+    """Return the currently supported separation backends."""
+    return (DEMUX_LEGACY_BACKEND,)
+
+
 def separate_stems(
     audio: AudioBuffer,
+    engine: SeparationEngineName = "demucs_legacy",
     model_name: ModelName = "htdemucs",
     device: str | None = None,
     shifts: int = 1,
@@ -89,6 +119,9 @@ def separate_stems(
     Returns:
         :class:`SeparationResult` with *vocals*, *drums*, *bass*, *other*.
     """
+    if engine != "demucs_legacy":
+        raise ValueError(f"Unknown separation engine: {engine!r}")
+
     _ensure_demucs()
 
     import torch
@@ -167,26 +200,46 @@ def separate_stems(
     )
 
 
-def extract_vocals(
+def extract_stem(
     audio: AudioBuffer,
+    stem_name: StemName = "vocals",
+    engine: SeparationEngineName = "demucs_legacy",
     model_name: ModelName = "htdemucs",
     device: str | None = None,
 ) -> AudioBuffer:
-    """Extract only the vocal track from audio.
+    """Extract a single stem from audio.
 
     Convenience wrapper around :func:`separate_stems` that returns
-    just the vocal stem.
+    the selected stem.
 
     Args:
         audio: Input audio.
+        stem_name: Name of the stem to extract.
+        engine: Separation backend.
         model_name: Demucs model variant.
         device: Torch device or *None* for auto-select.
 
     Returns:
-        AudioBuffer containing the isolated vocal track.
+        AudioBuffer containing the isolated stem.
     """
-    result = separate_stems(audio, model_name=model_name, device=device)
-    return result.vocals
+    result = separate_stems(audio, engine=engine, model_name=model_name, device=device)
+    return result.stem(stem_name)
+
+
+def extract_vocals(
+    audio: AudioBuffer,
+    engine: SeparationEngineName = "demucs_legacy",
+    model_name: ModelName = "htdemucs",
+    device: str | None = None,
+) -> AudioBuffer:
+    """Extract only the vocal track from audio."""
+    return extract_stem(
+        audio,
+        stem_name="vocals",
+        engine=engine,
+        model_name=model_name,
+        device=device,
+    )
 
 
 def _silent_buffer(reference: AudioBuffer) -> AudioBuffer:

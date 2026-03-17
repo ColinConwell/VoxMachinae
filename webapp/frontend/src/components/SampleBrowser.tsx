@@ -6,8 +6,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+import { apiUrl } from '../lib/api'
 
 interface SampleEntry {
   name: string
@@ -25,6 +24,7 @@ interface Props {
     duration: number
     sample_rate: number
     name: string
+    channels?: number
   }) => void
 }
 
@@ -51,12 +51,12 @@ export function SampleBrowser({ onSampleLoaded }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const resp = await fetch(`${API}/api/samples`)
+      const resp = await fetch(apiUrl('/api/samples'))
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       setSamples(data.samples ?? [])
-    } catch (err: any) {
-      setError(err.message ?? 'Failed to fetch samples')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch samples')
     } finally {
       setLoading(false)
     }
@@ -67,14 +67,14 @@ export function SampleBrowser({ onSampleLoaded }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const resp = await fetch(`${API}/api/samples/generate-test`, {
+      const resp = await fetch(apiUrl('/api/samples/generate-test'), {
         method: 'POST',
       })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       // Re-fetch catalog
       await fetchSamples()
-    } catch (err: any) {
-      setError(err.message ?? 'Failed to generate test samples')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate test samples')
       setLoading(false)
     }
   }, [fetchSamples])
@@ -85,7 +85,7 @@ export function SampleBrowser({ onSampleLoaded }: Props) {
       setLoadingSample(name)
       setError(null)
       try {
-        const resp = await fetch(`${API}/api/samples/load?name=${encodeURIComponent(name)}`, {
+        const resp = await fetch(apiUrl(`/api/samples/load?name=${encodeURIComponent(name)}`), {
           method: 'POST',
         })
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -95,9 +95,10 @@ export function SampleBrowser({ onSampleLoaded }: Props) {
           duration: data.duration,
           sample_rate: data.sample_rate,
           name: data.name,
+          channels: data.channels,
         })
-      } catch (err: any) {
-        setError(err.message ?? 'Failed to load sample')
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load sample')
       } finally {
         setLoadingSample(null)
       }

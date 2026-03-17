@@ -16,6 +16,8 @@ import { SampleBrowser } from './components/SampleBrowser'
 import { EffectsChainPanel } from './components/EffectsChainPanel'
 import { WaveBackground } from './components/WaveBackground'
 import { GuidedTour, TourTrigger } from './components/GuidedTour'
+import { WorkspaceStatusBar } from './components/WorkspaceStatusBar'
+import { apiUrl } from './lib/api'
 
 const DISPLAY_FONT_STYLE = { fontFamily: 'var(--font-display)' } as const
 const BODY_FONT_STYLE = { fontFamily: 'var(--font-body)', letterSpacing: '0.2em' } as const
@@ -25,6 +27,7 @@ interface SessionInfo {
   duration: number
   sample_rate: number
   name: string
+  channels?: number
 }
 
 type ActivePanel = 'autotune' | 'vocoder' | 'stems' | 'reverb' | 'delay' | 'formant' | 'denoise' | 'generate' | 'ai' | null
@@ -34,6 +37,7 @@ function App() {
   const [activePanel, setActivePanel] = useState<ActivePanel>(null)
   const [processedKey, setProcessedKey] = useState(0)
   const [showTour, setShowTour] = useState(false)
+  const [resetting, setResetting] = useState(false)
 
   const handleAudioLoaded = useCallback((info: SessionInfo) => {
     setSession(info)
@@ -44,6 +48,28 @@ function App() {
   const handleProcessed = useCallback(() => {
     setProcessedKey((k) => k + 1)
   }, [])
+
+  const handleReset = useCallback(async () => {
+    if (!session || processedKey === 0) {
+      return
+    }
+
+    setResetting(true)
+    try {
+      const response = await fetch(apiUrl(`/api/session/${session.session_id}/reset`), {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        throw new Error('Failed to reset processed audio')
+      }
+      setProcessedKey(0)
+      setActivePanel(null)
+    } catch (error) {
+      console.error('Reset failed:', error)
+    } finally {
+      setResetting(false)
+    }
+  }, [processedKey, session])
 
   return (
     <div className="relative min-h-screen text-zinc-100">
@@ -80,6 +106,16 @@ function App() {
         {/* Workspace */}
         {session && (
           <div className="space-y-6 animate-fade-up">
+            <WorkspaceStatusBar
+              name={session.name}
+              duration={session.duration}
+              sampleRate={session.sample_rate}
+              channels={session.channels}
+              hasProcessedAudio={processedKey > 0}
+              onReset={handleReset}
+              resetting={resetting}
+            />
+
             {/* Waveforms */}
             <section className="glass-card rounded-2xl p-4 sm:p-6" data-tour="waveform">
               <div className="mb-4 flex items-center gap-3">
@@ -227,7 +263,7 @@ function App() {
 
               {processedKey > 0 && (
                 <a
-                  href={`/api/session/${session.session_id}/download?source=processed`}
+                  href={apiUrl(`/api/session/${session.session_id}/download?source=processed`)}
                   data-tour="export"
                   className="ml-auto rounded-xl bg-emerald-500/20 border border-emerald-500/30 px-4 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-semibold text-emerald-300 transition-all hover:bg-emerald-500/30 glow-emerald"
                   style={DISPLAY_FONT_STYLE}

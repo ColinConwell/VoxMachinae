@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
+import { apiUrl } from '../lib/api'
 
 interface SessionInfo {
   session_id: string
@@ -15,6 +16,7 @@ export function AudioRecorder({ onAudioLoaded }: AudioRecorderProps) {
   const [isRecording, setIsRecording] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -22,10 +24,11 @@ export function AudioRecorder({ onAudioLoaded }: AudioRecorderProps) {
   const uploadFile = useCallback(
     async (file: File | Blob, filename: string) => {
       setIsUploading(true)
+      setError(null)
       try {
         const formData = new FormData()
         formData.append('file', file, filename)
-        const res = await fetch('/api/upload', {
+        const res = await fetch(apiUrl('/api/upload'), {
           method: 'POST',
           body: formData,
         })
@@ -34,6 +37,7 @@ export function AudioRecorder({ onAudioLoaded }: AudioRecorderProps) {
         onAudioLoaded(info)
       } catch (err) {
         console.error('Upload error:', err)
+        setError(err instanceof Error ? err.message : 'Upload failed')
       } finally {
         setIsUploading(false)
       }
@@ -43,6 +47,7 @@ export function AudioRecorder({ onAudioLoaded }: AudioRecorderProps) {
 
   const startRecording = useCallback(async () => {
     try {
+      setError(null)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: 'audio/webm',
@@ -64,6 +69,7 @@ export function AudioRecorder({ onAudioLoaded }: AudioRecorderProps) {
       setIsRecording(true)
     } catch (err) {
       console.error('Mic access error:', err)
+      setError('Microphone access was denied or is unavailable in this browser.')
     }
   }, [uploadFile])
 
@@ -172,6 +178,11 @@ export function AudioRecorder({ onAudioLoaded }: AudioRecorderProps) {
           <p className="text-[11px] text-zinc-600" style={{ fontFamily: 'var(--font-body)' }}>
             Supports WAV, MP3, FLAC, OGG, WebM
           </p>
+          {error && (
+            <p className="text-sm text-red-400" style={{ fontFamily: 'var(--font-body)' }}>
+              {error}
+            </p>
+          )}
         </div>
       )}
     </div>

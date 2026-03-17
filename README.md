@@ -133,7 +133,7 @@ save_audio(result.audio, "output.wav")
 
 ```bash
 cd webapp/backend
-pip install -r requirements.txt
+pip install -e ".[web]"
 uvicorn main:app --reload
 ```
 

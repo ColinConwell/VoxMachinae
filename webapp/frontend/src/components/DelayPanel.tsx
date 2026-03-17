@@ -1,5 +1,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import { HelpTooltip, DSP_HELP } from './HelpTooltip'
+import { apiUrl } from '../lib/api'
+import { ACCENT_STYLES, type AccentColor } from '../lib/accent'
 
 interface DelayPanelProps {
   sessionId: string
@@ -33,7 +35,7 @@ export function DelayPanel({ sessionId, onProcessed }: DelayPanelProps) {
     setProcessing(true)
     setError(null)
     try {
-      const res = await fetch('/api/process/effect', {
+      const res = await fetch(apiUrl('/api/process/effect'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -216,9 +218,11 @@ function SliderControl({
   label, value, min, max, step = 0.01, unit, displayValue, onChange, color, help,
 }: {
   label: string; value: number; min: number; max: number; step?: number
-  unit: string; displayValue?: string; onChange: (v: number) => void; color: string
+  unit: string; displayValue?: string; onChange: (v: number) => void; color: AccentColor
   help?: { label: string; description: string; learnMoreUrl?: string }
 }) {
+  const accent = ACCENT_STYLES[color]
+
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between">
@@ -229,8 +233,8 @@ function SliderControl({
           {help ? <HelpTooltip {...help}>{label}</HelpTooltip> : label}
         </label>
         <span
-          className={`text-xs tabular-nums text-${color}-400/70`}
-          style={{ fontFamily: 'var(--font-body)' }}
+          className="text-xs tabular-nums"
+          style={{ fontFamily: 'var(--font-body)', color: accent.textColor }}
         >
           {displayValue ?? `${value}${unit}`}
         </span>
@@ -242,7 +246,8 @@ function SliderControl({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className={`w-full accent-${color}-500`}
+        className="w-full"
+        style={{ accentColor: accent.accentColor }}
       />
     </div>
   )

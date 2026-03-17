@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+import { apiUrl } from '../lib/api'
 
 interface AIChatProps {
   sessionId: string
@@ -119,7 +118,7 @@ export function AIChatPanel({ sessionId, onApplyParams }: AIChatProps) {
       ])
 
       try {
-        const resp = await fetch(`${API}/api/ai/chat`, {
+        const resp = await fetch(apiUrl('/api/ai/chat'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

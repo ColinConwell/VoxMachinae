@@ -1,5 +1,8 @@
 import { useState, useCallback } from 'react'
 import { HelpTooltip, DSP_HELP } from './HelpTooltip'
+import { apiUrl } from '../lib/api'
+import { ACCENT_STYLES, type AccentColor } from '../lib/accent'
+import { createDeterministicBars } from '../lib/animation'
 
 interface DenoisePanelProps {
   sessionId: string
@@ -23,6 +26,8 @@ const MODE_INFO: Record<DenoiseMode, { label: string; description: string }> = {
   },
 }
 
+const NOISE_BAR_VARIATION = createDeterministicBars(16, 1337)
+
 export function DenoisePanel({ sessionId, onProcessed }: DenoisePanelProps) {
   const [mode, setMode] = useState<DenoiseMode>('noise_reduce')
   const [stationary, setStationary] = useState(true)
@@ -40,7 +45,7 @@ export function DenoisePanel({ sessionId, onProcessed }: DenoisePanelProps) {
     setError(null)
     setProgress(mode === 'enhance_speech' || mode === 'full' ? 'Loading DeepFilterNet model...' : 'Processing...')
     try {
-      const res = await fetch('/api/process/denoise', {
+      const res = await fetch(apiUrl('/api/process/denoise'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -133,7 +138,7 @@ export function DenoisePanel({ sessionId, onProcessed }: DenoisePanelProps) {
             <div className="flex items-end justify-center gap-px h-12">
               {Array.from({ length: 16 }, (_, i) => {
                 const signalHeight = 30 + Math.sin(i * 0.8) * 25
-                const noiseHeight = 8 + Math.random() * 15
+                const noiseHeight = 8 + NOISE_BAR_VARIATION[i] * 15
                 return (
                   <div key={i} className="flex-1 flex flex-col items-center gap-0">
                     <div
@@ -319,9 +324,11 @@ function SliderControl({
   label, value, min, max, step = 0.01, unit, displayValue, onChange, color, help,
 }: {
   label: string; value: number; min: number; max: number; step?: number
-  unit: string; displayValue?: string; onChange: (v: number) => void; color: string
+  unit: string; displayValue?: string; onChange: (v: number) => void; color: AccentColor
   help?: { label: string; description: string; learnMoreUrl?: string }
 }) {
+  const accent = ACCENT_STYLES[color]
+
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between">
@@ -332,8 +339,8 @@ function SliderControl({
           {help ? <HelpTooltip {...help}>{label}</HelpTooltip> : label}
         </label>
         <span
-          className={`text-xs tabular-nums text-${color}-400/70`}
-          style={{ fontFamily: 'var(--font-body)' }}
+          className="text-xs tabular-nums"
+          style={{ fontFamily: 'var(--font-body)', color: accent.textColor }}
         >
           {displayValue ?? `${value}${unit}`}
         </span>
@@ -345,7 +352,8 @@ function SliderControl({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className={`w-full accent-${color}-500`}
+        className="w-full"
+        style={{ accentColor: accent.accentColor }}
       />
     </div>
   )

@@ -3,6 +3,7 @@ import { WaveGrid } from './backgrounds/WaveGrid'
 import { ParticleField } from './backgrounds/ParticleField'
 import { StaticGradient } from './backgrounds/StaticGradient'
 import { BackgroundToggle } from './backgrounds/BackgroundToggle'
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 
 /**
  * WaveBackground - Wrapper component that renders the currently selected
@@ -10,12 +11,14 @@ import { BackgroundToggle } from './backgrounds/BackgroundToggle'
  */
 export function WaveBackground() {
   const { mode } = useBackground()
+  const prefersReducedMotion = usePrefersReducedMotion()
+  const effectiveMode = prefersReducedMotion ? 'static-gradient' : mode
 
   return (
     <>
-      {mode === 'wave-grid' && <WaveGrid />}
-      {mode === 'particle-field' && <ParticleField />}
-      {mode === 'static-gradient' && <StaticGradient />}
+      {effectiveMode === 'wave-grid' && <WaveGrid />}
+      {effectiveMode === 'particle-field' && <ParticleField />}
+      {effectiveMode === 'static-gradient' && <StaticGradient />}
 
       {/* Grain/noise overlay for texture (shared across all modes) */}
       <div

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 
 export type BackgroundMode = 'wave-grid' | 'particle-field' | 'static-gradient'
@@ -21,6 +22,11 @@ function getStoredMode(): BackgroundMode {
     }
   } catch {
     // localStorage may be unavailable
+  }
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return 'static-gradient'
+    }
   }
   return 'wave-grid'
 }

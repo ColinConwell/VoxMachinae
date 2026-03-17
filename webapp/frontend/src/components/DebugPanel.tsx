@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { apiUrl } from '../lib/api'
 
 interface LogEntry {
   id: number
@@ -40,7 +41,7 @@ export function DebugPanel() {
   const checkHealth = useCallback(async () => {
     setHealthStatus('checking')
     try {
-      const res = await fetch('/api/health')
+      const res = await fetch(apiUrl('/api/health'))
       if (res.ok) {
         const data = await res.json()
         setHealthStatus('ok')
@@ -58,9 +59,14 @@ export function DebugPanel() {
 
   // Check on mount & periodically
   useEffect(() => {
-    checkHealth()
+    const initialCheck = window.setTimeout(() => {
+      void checkHealth()
+    }, 0)
     const interval = setInterval(checkHealth, 30000)
-    return () => clearInterval(interval)
+    return () => {
+      clearTimeout(initialCheck)
+      clearInterval(interval)
+    }
   }, [checkHealth])
 
   // Intercept console.error and fetch errors

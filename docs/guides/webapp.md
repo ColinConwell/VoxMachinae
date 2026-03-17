@@ -8,7 +8,7 @@ The Vox Machina web app provides a browser-based interface for all library featu
 
 ```bash
 cd webapp/backend
-pip install -r requirements.txt
+pip install -e ".[web]"
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -54,7 +54,7 @@ Click any effect button to open its control panel:
 
 ### Effects Chain
 
-The effects chain panel at the bottom lets you build a processing pipeline by enabling multiple effects in sequence. Drag to reorder, toggle effects on/off, and adjust parameters for each stage.
+The effects chain panel at the bottom lets you build a processing pipeline by enabling multiple effects in sequence. Drag to reorder, toggle effects on/off, run the chain, and review any stage failures directly in the UI.
 
 ### Export
 
@@ -67,20 +67,19 @@ The backend exposes a REST + WebSocket API:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/upload` | POST | Upload an audio file |
-| `/api/record` | POST | Submit recorded audio |
 | `/api/session/{id}/waveform` | GET | Get waveform data |
 | `/api/session/{id}/download` | GET | Download audio |
+| `/api/session/{id}/reset` | POST | Reset processed audio to the original source |
 | `/api/process/autotune` | POST | Apply auto-tune |
 | `/api/process/vocoder` | POST | Apply vocoder |
-| `/api/process/reverb` | POST | Apply reverb |
-| `/api/process/delay` | POST | Apply delay |
-| `/api/process/formant` | POST | Apply formant shift |
+| `/api/process/effect` | POST | Apply reverb, delay, or formant shift |
 | `/api/process/denoise` | POST | Apply denoising |
 | `/api/process/separate` | POST | Stem separation |
-| `/api/process/chain` | POST | Apply effects chain |
-| `/api/generate/music` | POST | Generate music via AI |
-| `/api/chat` | POST | AI chat assistant |
-| `/ws/audio/{id}` | WS | Real-time audio streaming |
+| `/api/separation/options` | GET | List separation engines, models, and stems |
+| `/api/chain/run/{id}` | POST | Apply the effects chain |
+| `/api/generate` | POST | Generate music via AI |
+| `/api/ai/chat` | POST | AI chat assistant |
+| `/ws/{id}` | WS | Real-time audio streaming |
 
 Visit `http://localhost:8000/docs` for the full interactive API documentation.
 

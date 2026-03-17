@@ -1,8 +1,6 @@
 """Session management for audio workspaces."""
 
 from __future__ import annotations
-
-import copy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -50,6 +48,11 @@ class SessionManager:
         session = self._sessions.get(session_id)
         if session is not None:
             session["processed"] = audio
+
+    def clear_processed(self, session_id: str) -> None:
+        session = self._sessions.get(session_id)
+        if session is not None:
+            session.pop("processed", None)
 
     def delete(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)

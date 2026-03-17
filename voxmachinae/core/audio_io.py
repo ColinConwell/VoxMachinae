@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass, field
+from math import gcd
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
+from scipy.signal import resample_poly
 
 
 SampleRate = Literal[22050, 44100, 48000]
@@ -59,9 +61,10 @@ class AudioBuffer:
         """Resample to a different sample rate using librosa."""
         if target_sr == self.sample_rate:
             return self
-        import librosa
-
-        resampled = librosa.resample(self.mono, orig_sr=self.sample_rate, target_sr=target_sr)
+        factor = gcd(self.sample_rate, target_sr)
+        up = target_sr // factor
+        down = self.sample_rate // factor
+        resampled = resample_poly(self.data, up, down, axis=0)
         return AudioBuffer(data=resampled, sample_rate=target_sr, name=self.name)
 
     def trim_silence(self, top_db: float = 30.0) -> AudioBuffer:

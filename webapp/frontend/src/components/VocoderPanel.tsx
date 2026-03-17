@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { HelpTooltip, DSP_HELP } from './HelpTooltip'
+import { apiUrl } from '../lib/api'
 
 interface VocoderPanelProps {
   sessionId: string
@@ -59,7 +60,7 @@ export function VocoderPanel({ sessionId, onProcessed }: VocoderPanelProps) {
         params.order = lpcOrder
       }
 
-      const res = await fetch('/api/process/vocoder', {
+      const res = await fetch(apiUrl('/api/process/vocoder'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),

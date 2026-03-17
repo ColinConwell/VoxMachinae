@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 
 // ─── Tour Step Definitions ───────────────────────────────────────────────────
 
-export interface TourStep {
+interface TourStep {
   /** CSS selector for the element to spotlight (null = centered modal) */
   target: string | null
   /** Title of this step */
@@ -17,7 +17,7 @@ export interface TourStep {
   icon?: string
 }
 
-export const TOUR_STEPS: TourStep[] = [
+const TOUR_STEPS: TourStep[] = [
   {
     target: null,
     title: 'Welcome to Vox Machina',
@@ -108,9 +108,11 @@ export function GuidedTour({ forceShow, onComplete }: GuidedTourProps) {
   // Auto-show on first visit
   useEffect(() => {
     if (forceShow) {
-      setActive(true)
-      setStep(0)
-      return
+      const timer = setTimeout(() => {
+        setActive(true)
+        setStep(0)
+      }, 0)
+      return () => clearTimeout(timer)
     }
     const completed = localStorage.getItem(TOUR_COMPLETED_KEY)
     if (completed !== TOUR_VERSION) {
@@ -125,14 +127,14 @@ export function GuidedTour({ forceShow, onComplete }: GuidedTourProps) {
     if (!active) return
     const currentStep = TOUR_STEPS[step]
     if (!currentStep?.target) {
-      setSpotlightRect(null)
-      return
+      const timer = setTimeout(() => setSpotlightRect(null), 0)
+      return () => clearTimeout(timer)
     }
 
     const el = document.querySelector(currentStep.target)
     if (!el) {
-      setSpotlightRect(null)
-      return
+      const timer = setTimeout(() => setSpotlightRect(null), 0)
+      return () => clearTimeout(timer)
     }
 
     const updateRect = () => {
@@ -409,8 +411,12 @@ function getAccentVars(accent: string): React.CSSProperties {
 
 function getCardPosition(
   rect: DOMRect,
-  placement: 'top' | 'bottom' | 'left' | 'right',
+  placement: 'top' | 'bottom' | 'left' | 'right' | 'center',
 ): React.CSSProperties {
+  if (placement === 'center') {
+    return {}
+  }
+
   const gap = 16
   const cardW = Math.min(380, window.innerWidth - 32)
 

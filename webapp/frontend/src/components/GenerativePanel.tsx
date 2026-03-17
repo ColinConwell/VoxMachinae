@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
-
-const API = 'http://localhost:8000'
+import { apiUrl } from '../lib/api'
+import { createDeterministicBars } from '../lib/animation'
 
 interface GenerativeProps {
   sessionId?: string
@@ -47,7 +47,9 @@ const STYLE_PRESETS = [
   { label: 'Jazz', tags: 'jazz, smooth, saxophone, swing' },
 ]
 
-export function GenerativePanel({ sessionId, onTrackLoaded }: GenerativeProps) {
+const GENERATIVE_BARS = createDeterministicBars(48, 9001)
+
+export function GenerativePanel({ onTrackLoaded }: GenerativeProps) {
   const [engine, setEngine] = useState<Engine>('suno')
   const [prompt, setPrompt] = useState('')
   const [title, setTitle] = useState('')
@@ -69,7 +71,7 @@ export function GenerativePanel({ sessionId, onTrackLoaded }: GenerativeProps) {
     setProgress(10)
 
     try {
-      const resp = await fetch(`${API}/api/generate`, {
+      const resp = await fetch(apiUrl('/api/generate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -106,7 +108,7 @@ export function GenerativePanel({ sessionId, onTrackLoaded }: GenerativeProps) {
           throw new Error('Generation timed out after 5 minutes')
         }
 
-        const pollResp = await fetch(`${API}/api/generate/status/${taskId}`)
+        const pollResp = await fetch(apiUrl(`/api/generate/status/${taskId}`))
         if (!pollResp.ok) throw new Error('Failed to check status')
 
         const pollData = await pollResp.json()
@@ -145,7 +147,7 @@ export function GenerativePanel({ sessionId, onTrackLoaded }: GenerativeProps) {
       setStatusMessage('Loading track into workspace…')
 
       try {
-        const resp = await fetch(`${API}/api/generate/load/${trackId}`, {
+        const resp = await fetch(apiUrl(`/api/generate/load/${trackId}`), {
           method: 'POST',
         })
         if (!resp.ok) throw new Error('Failed to load track')
@@ -383,7 +385,7 @@ export function GenerativePanel({ sessionId, onTrackLoaded }: GenerativeProps) {
         <div className="flex items-end justify-center gap-[2px] h-12 opacity-60">
           {Array.from({ length: 48 }, (_, i) => {
             const h = isProcessing
-              ? 8 + Math.sin(Date.now() / 300 + i * 0.5) * 20 + Math.random() * 8
+              ? 8 + Math.sin(Date.now() / 300 + i * 0.5) * 16 + GENERATIVE_BARS[i] * 6
               : 4 + Math.sin(i * 0.3) * 12 + Math.cos(i * 0.7) * 6
             return (
               <div

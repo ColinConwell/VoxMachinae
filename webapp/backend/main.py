@@ -11,6 +11,7 @@ import json
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, HTTPException
@@ -18,10 +19,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from voxmachinae.core.audio_io import AudioBuffer, load_audio, save_audio
+from voxmachinae.core.audio_io import load_audio
 from voxmachinae.core.autotune import AutoTune, AutoTuneParams
 from voxmachinae.core.pitch import detect_pitch
-from voxmachinae.core.scales import Scale, SCALE_INTERVALS, NOTE_NAMES, detect_key
+from voxmachinae.core.scales import SCALE_INTERVALS, NOTE_NAMES, detect_key
 from voxmachinae.core.vocoder import (
     ChannelVocoder,
     ChannelVocoderParams,
@@ -35,7 +36,7 @@ from voxmachinae.core.effects import (
     apply_delay, DelayParams,
     apply_formant_shift, FormantShiftParams,
 )
-from voxmachinae.core.separation import extract_vocals
+from voxmachinae.core.separation import extract_stem, list_separation_backends, STEM_NAMES
 from voxmachinae.core.denoise import (
     reduce_noise, NoiseReduceParams,
     enhance_speech,
@@ -57,13 +58,13 @@ from voxmachinae.utils.samples import (
     list_samples,
     load_sample,
     generate_test_samples,
-    SampleInfo,
 )
 
 from webapp.backend.session import SessionManager, EffectNode
 
 # Lazy imports for optional AI/generative features
 _generative_clients: dict = {}
+AudioSource = Literal["auto", "original", "processed"]
 
 app = FastAPI(title="VoxMachina", version="0.1.0")
 
@@ -85,6 +86,7 @@ sessions = SessionManager()
 
 class AutoTuneRequest(BaseModel):
     session_id: str
+    source: AudioSource = "auto"
     key: str = "C"
     scale_type: str = "chromatic"
     retune_speed: float = 0.0
@@ -97,6 +99,7 @@ class AutoTuneRequest(BaseModel):
 
 class VocoderRequest(BaseModel):
     session_id: str
+    source: AudioSource = "auto"
     vocoder_type: str = "channel"  # "channel", "phase", "lpc"
     preset: str | None = None
     # Channel vocoder params
@@ -114,6 +117,7 @@ class VocoderRequest(BaseModel):
 
 class EffectRequest(BaseModel):
     session_id: str
+    source: AudioSource = "auto"
     effect_type: str  # "reverb", "delay", "formant_shift"
     # Reverb
     room_size: float = 0.5
@@ -166,11 +170,15 @@ class ChainUpdateRequest(BaseModel):
 
 class SeparateRequest(BaseModel):
     session_id: str
+    source: AudioSource = "auto"
+    engine: str = "demucs_legacy"
     model: str = "htdemucs"  # "htdemucs", "htdemucs_ft", "mdx_extra"
+    stem: str = "vocals"
 
 
 class DenoiseRequest(BaseModel):
     session_id: str
+    source: AudioSource = "auto"
     mode: str = "noise_reduce"  # "noise_reduce", "enhance_speech", "full"
     # Noise reduction params
     stationary: bool = True
@@ -188,9 +196,44 @@ class DenoiseRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _get_session_audio(session_id: str, source: AudioSource = "auto"):
+    """Resolve which buffer to process for a request."""
+    if source == "original":
+        audio = sessions.get_audio(session_id, "original")
+    elif source == "processed":
+        audio = sessions.get_audio(session_id, "processed")
+        if audio is None:
+            raise HTTPException(409, "No processed audio is available for this session yet")
+    else:
+        audio = sessions.get_audio(session_id, "processed")
+        if audio is None:
+            audio = sessions.get_audio(session_id, "original")
+
+    if audio is None:
+        raise HTTPException(404, "Session not found")
+    return audio
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": "0.1.0"}
+
+
+@app.get("/api/separation/options")
+async def separation_options():
+    """List supported separation engines, models, and stems."""
+    return {
+        "engines": [
+            {
+                "engine": backend.engine,
+                "label": backend.label,
+                "description": backend.description,
+                "models": list(backend.models),
+                "stems": list(backend.stems),
+            }
+            for backend in list_separation_backends()
+        ]
+    }
 
 
 @app.get("/api/scales")
@@ -225,7 +268,7 @@ async def upload_audio(file: UploadFile = File(...)):
         tmp.write(content)
         tmp_path = tmp.name
 
-    audio = load_audio(tmp_path, mono=True)
+    audio = load_audio(tmp_path, mono=False)
     sessions.create(session_id, audio)
 
     # Clean up temp file
@@ -299,9 +342,7 @@ async def get_pitch(session_id: str, method: str = "pyin"):
 @app.post("/api/process/autotune")
 async def process_autotune(req: AutoTuneRequest):
     """Apply auto-tune effect."""
-    audio = sessions.get_audio(req.session_id, "original")
-    if audio is None:
-        raise HTTPException(404, "Session not found")
+    audio = _get_session_audio(req.session_id, req.source)
 
     if req.preset:
         params = get_autotune_preset(req.preset, req.key, req.scale_type)
@@ -333,9 +374,7 @@ async def process_autotune(req: AutoTuneRequest):
 @app.post("/api/process/vocoder")
 async def process_vocoder(req: VocoderRequest):
     """Apply vocoder effect."""
-    audio = sessions.get_audio(req.session_id, "original")
-    if audio is None:
-        raise HTTPException(404, "Session not found")
+    audio = _get_session_audio(req.session_id, req.source)
 
     if req.vocoder_type == "channel":
         if req.preset and req.preset in CHANNEL_VOCODER_PRESETS:
@@ -387,12 +426,7 @@ async def process_vocoder(req: VocoderRequest):
 @app.post("/api/process/effect")
 async def process_effect(req: EffectRequest):
     """Apply an additional effect (reverb, delay, formant shift)."""
-    # Apply to processed audio if available, otherwise original
-    audio = sessions.get_audio(req.session_id, "processed")
-    if audio is None:
-        audio = sessions.get_audio(req.session_id, "original")
-    if audio is None:
-        raise HTTPException(404, "Session not found")
+    audio = _get_session_audio(req.session_id, req.source)
 
     if req.effect_type == "reverb":
         result = apply_reverb(audio, ReverbParams(
@@ -419,36 +453,41 @@ async def process_effect(req: EffectRequest):
 @app.post("/api/process/separate")
 async def process_separate(req: SeparateRequest):
     """Separate vocals from the uploaded audio using Demucs."""
-    audio = sessions.get_audio(req.session_id, "original")
-    if audio is None:
-        raise HTTPException(404, "Session not found")
+    audio = _get_session_audio(req.session_id, req.source)
+
+    if req.stem not in STEM_NAMES:
+        raise HTTPException(400, f"Unknown stem: {req.stem}")
 
     try:
-        vocals = extract_vocals(audio, model_name=req.model)
+        stem_audio = extract_stem(
+            audio,
+            stem_name=req.stem,
+            engine=req.engine,
+            model_name=req.model,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     except ImportError as exc:
         raise HTTPException(
             501,
             f"Stem separation is not available: {exc}",
         )
 
-    sessions.set_processed(req.session_id, vocals)
+    sessions.set_processed(req.session_id, stem_audio)
 
     return {
         "session_id": req.session_id,
-        "duration": vocals.duration,
+        "duration": stem_audio.duration,
+        "engine": req.engine,
         "model": req.model,
+        "stem": req.stem,
     }
 
 
 @app.post("/api/process/denoise")
 async def process_denoise(req: DenoiseRequest):
     """Apply denoising / speech enhancement to session audio."""
-    # Work on processed audio if available (e.g., after separation), else original
-    audio = sessions.get_audio(req.session_id, "processed")
-    if audio is None:
-        audio = sessions.get_audio(req.session_id, "original")
-    if audio is None:
-        raise HTTPException(404, "Session not found")
+    audio = _get_session_audio(req.session_id, req.source)
 
     result = audio
 
@@ -504,6 +543,23 @@ async def get_chain(session_id: str):
     """Get the current effects chain for a session."""
     chain = sessions.get_chain(session_id)
     return {"chain": [n.to_dict() for n in chain]}
+
+
+@app.post("/api/session/{session_id}/reset")
+async def reset_processed_audio(session_id: str):
+    """Clear processed audio and return the session to its original source."""
+    original = sessions.get_audio(session_id, "original")
+    if original is None:
+        raise HTTPException(404, "Session not found")
+
+    sessions.clear_processed(session_id)
+    return {
+        "session_id": session_id,
+        "duration": original.duration,
+        "sample_rate": original.sample_rate,
+        "channels": original.channels,
+        "source": "original",
+    }
 
 
 @app.post("/api/chain/add")
@@ -563,12 +619,24 @@ async def run_chain(session_id: str):
     enabled = [n for n in chain if n.enabled]
 
     if not enabled:
-        return {"session_id": session_id, "effects_applied": 0, "duration": original.duration}
+        return {
+            "session_id": session_id,
+            "ok": True,
+            "effects_attempted": 0,
+            "effects_succeeded": 0,
+            "effects_failed": 0,
+            "results": [],
+            "duration": original.duration,
+        }
 
     result = original
+    node_results: list[dict[str, str | bool]] = []
+    success_count = 0
+    failure_count = 0
 
     for node in enabled:
         try:
+            handled = True
             if node.effect_type == "autotune":
                 p = node.params
                 params = AutoTuneParams(
@@ -642,21 +710,45 @@ async def run_chain(session_id: str):
                         stationary=p.get("stationary", True),
                         prop_decrease=p.get("prop_decrease", 0.8),
                     ))
+            else:
+                handled = False
+
+            if not handled:
+                raise ValueError(f"Unknown effect type: {node.effect_type}")
+
+            success_count += 1
+            node_results.append({
+                "id": node.id,
+                "effect_type": node.effect_type,
+                "ok": True,
+                "message": "",
+            })
 
         except Exception as exc:
-            # Skip failed effects but continue the chain
             import logging
             logging.getLogger(__name__).warning(
                 f"Effect {node.effect_type} (id={node.id}) failed: {exc}"
             )
+            failure_count += 1
+            node_results.append({
+                "id": node.id,
+                "effect_type": node.effect_type,
+                "ok": False,
+                "message": str(exc),
+            })
             continue
 
-    sessions.set_processed(session_id, result)
+    if success_count > 0:
+        sessions.set_processed(session_id, result)
 
     return {
         "session_id": session_id,
-        "effects_applied": len(enabled),
-        "duration": result.duration,
+        "ok": failure_count == 0,
+        "effects_attempted": len(enabled),
+        "effects_succeeded": success_count,
+        "effects_failed": failure_count,
+        "results": node_results,
+        "duration": result.duration if success_count > 0 else original.duration,
     }
 
 
@@ -689,7 +781,7 @@ async def api_list_samples(category: str | None = None):
 async def api_load_sample(name: str, sr: int | None = None):
     """Load a sample from the library into a new session."""
     try:
-        audio = load_sample(name, sr=sr, mono=True)
+        audio = load_sample(name, sr=sr, mono=False)
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc))
 
@@ -701,6 +793,7 @@ async def api_load_sample(name: str, sr: int | None = None):
         "name": name,
         "duration": audio.duration,
         "sample_rate": audio.sample_rate,
+        "channels": audio.channels,
     }
 
 

@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react'
+import { clampFrameDelta, lerp, preferredDevicePixelRatio } from '../../lib/animation'
+import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion'
 
 // Color palette matching the app theme
 const AMBER = { r: 251, g: 191, b: 36 }
@@ -14,10 +16,6 @@ interface Particle {
   alpha: number
   /** Base drift speed multiplier */
   drift: number
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t
 }
 
 function randomBetween(min: number, max: number): number {
@@ -52,6 +50,7 @@ const MOUSE_PUSH_STRENGTH = 0.8
 export function ParticleField() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const mouseRef = useRef({ x: -9999, y: -9999 })
+  const prefersReducedMotion = usePrefersReducedMotion()
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -64,9 +63,11 @@ export function ParticleField() {
     let height = 0
     let dpr = 1
     let particles: Particle[] = []
+    let lastFrameTime = 0
+    const smoothedMouse = { x: -9999, y: -9999 }
 
     const resize = () => {
-      dpr = window.devicePixelRatio || 1
+      dpr = preferredDevicePixelRatio(window.devicePixelRatio || 1, prefersReducedMotion)
       width = window.innerWidth
       height = window.innerHeight
       canvas.width = width * dpr
@@ -74,30 +75,40 @@ export function ParticleField() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
       // Reinitialize particles on resize if needed
+      const particleCount = prefersReducedMotion ? 48 : PARTICLE_COUNT
       if (particles.length === 0) {
-        particles = Array.from({ length: PARTICLE_COUNT }, () =>
+        particles = Array.from({ length: particleCount }, () =>
           createParticle(width, height),
         )
+      } else if (particles.length > particleCount) {
+        particles = particles.slice(0, particleCount)
       } else {
         // Clamp existing particles to new bounds
         for (const p of particles) {
           if (p.x > width) p.x = width - 10
           if (p.y > height) p.y = height - 10
         }
+        while (particles.length < particleCount) {
+          particles.push(createParticle(width, height))
+        }
       }
     }
 
-    const onMouseMove = (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent) => {
       mouseRef.current.x = e.clientX
       mouseRef.current.y = e.clientY
     }
 
-    const onMouseLeave = () => {
+    const onPointerLeave = () => {
       mouseRef.current.x = -9999
       mouseRef.current.y = -9999
     }
 
     const draw = (time: number) => {
+      const delta = clampFrameDelta(time - lastFrameTime, prefersReducedMotion ? 24 : 32)
+      const deltaScale = delta / 16
+      lastFrameTime = time
+
       ctx.clearRect(0, 0, width, height)
 
       // Dark background
@@ -108,23 +119,25 @@ export function ParticleField() {
       ctx.fillStyle = bgGrad
       ctx.fillRect(0, 0, width, height)
 
-      const mx = mouseRef.current.x
-      const my = mouseRef.current.y
+      smoothedMouse.x = lerp(smoothedMouse.x, mouseRef.current.x, 0.08)
+      smoothedMouse.y = lerp(smoothedMouse.y, mouseRef.current.y, 0.08)
+      const mx = smoothedMouse.x
+      const my = smoothedMouse.y
 
       // Update particles
       for (const p of particles) {
         // Gentle brownian motion: add small random impulse each frame
-        p.vx += randomBetween(-0.008, 0.008)
-        p.vy += randomBetween(-0.008, 0.008)
+        p.vx += randomBetween(-0.006, 0.006) * deltaScale
+        p.vy += randomBetween(-0.006, 0.006) * deltaScale
 
         // Very gentle sine drift for organic floating feel
         const drift = Math.sin(time * 0.0003 * p.drift) * 0.02
-        p.vx += drift
-        p.vy += Math.cos(time * 0.00025 * p.drift) * 0.015
+        p.vx += drift * deltaScale
+        p.vy += Math.cos(time * 0.00025 * p.drift) * 0.012 * deltaScale
 
         // Damping to keep things calm
-        p.vx *= 0.985
-        p.vy *= 0.985
+        p.vx *= prefersReducedMotion ? 0.97 : 0.985
+        p.vy *= prefersReducedMotion ? 0.97 : 0.985
 
         // Clamp velocity
         const maxV = 0.6
@@ -139,13 +152,13 @@ export function ParticleField() {
         const dy = p.y - my
         const dist = Math.sqrt(dx * dx + dy * dy)
         if (dist < MOUSE_RADIUS && dist > 0) {
-          const force = (1 - dist / MOUSE_RADIUS) * MOUSE_PUSH_STRENGTH
+          const force = (1 - dist / MOUSE_RADIUS) * (prefersReducedMotion ? 0.35 : MOUSE_PUSH_STRENGTH)
           p.vx += (dx / dist) * force
           p.vy += (dy / dist) * force
         }
 
-        p.x += p.vx
-        p.y += p.vy
+        p.x += p.vx * deltaScale
+        p.y += p.vy * deltaScale
 
         // Wrap around edges with a soft margin
         const margin = 20
@@ -213,17 +226,18 @@ export function ParticleField() {
 
     resize()
     window.addEventListener('resize', resize)
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseleave', onMouseLeave)
-    animationId = requestAnimationFrame(draw)
+      window.addEventListener('pointermove', onPointerMove)
+      window.addEventListener('pointerleave', onPointerLeave)
+      lastFrameTime = performance.now()
+      animationId = requestAnimationFrame(draw)
 
     return () => {
       cancelAnimationFrame(animationId)
       window.removeEventListener('resize', resize)
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseleave', onMouseLeave)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerleave', onPointerLeave)
     }
-  }, [])
+  }, [prefersReducedMotion])
 
   return (
     <canvas
