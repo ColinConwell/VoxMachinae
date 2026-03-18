@@ -44,7 +44,7 @@ export function SampleBrowser({ onSampleLoaded }: Props) {
   const [loading, setLoading] = useState(false)
   const [loadingSample, setLoadingSample] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
 
   // Fetch sample catalog
   const fetchSamples = useCallback(async () => {
@@ -128,6 +128,8 @@ export function SampleBrowser({ onSampleLoaded }: Props) {
       {/* Toggle Header */}
       <button
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls="sample-library-content"
         className="flex w-full items-center justify-between px-6 py-4 text-left transition-all duration-200 hover:bg-white/[0.02]"
       >
         <div className="flex items-center gap-3">
@@ -155,7 +157,7 @@ export function SampleBrowser({ onSampleLoaded }: Props) {
       </button>
 
       {expanded && (
-        <div className="border-t border-white/[0.06] px-6 py-5 space-y-5 animate-fade-up">
+        <div id="sample-library-content" className="border-t border-white/[0.06] px-6 py-5 space-y-5 animate-fade-up">
           {error && (
             <div className="rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-2.5 text-sm text-red-300">
               {error}

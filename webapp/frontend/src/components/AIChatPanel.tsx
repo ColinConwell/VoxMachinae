@@ -3,7 +3,7 @@ import { apiUrl } from '../lib/api'
 
 interface AIChatProps {
   sessionId: string
-  onApplyParams?: (params: Record<string, unknown>) => void
+  onApplySuggestion?: (suggestion: SuggestionAction) => Promise<void> | void
 }
 
 interface ChatMessage {
@@ -78,7 +78,7 @@ function StreamingDots() {
   )
 }
 
-export function AIChatPanel({ sessionId, onApplyParams }: AIChatProps) {
+export function AIChatPanel({ sessionId, onApplySuggestion }: AIChatProps) {
   const [agentMode, setAgentMode] = useState<AgentMode>('coach')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -176,17 +176,29 @@ export function AIChatPanel({ sessionId, onApplyParams }: AIChatProps) {
     }
   }
 
-  const handleApplySuggestion = (suggestion: SuggestionAction) => {
-    onApplyParams?.(suggestion.params)
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        role: 'system',
-        content: `Applied "${suggestion.label}" → ${suggestion.effect}`,
-        timestamp: Date.now(),
-      },
-    ])
+  const handleApplySuggestion = async (suggestion: SuggestionAction) => {
+    try {
+      await onApplySuggestion?.(suggestion)
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: 'system',
+          content: `Applied "${suggestion.label}" -> ${suggestion.effect}`,
+          timestamp: Date.now(),
+        },
+      ])
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: 'system',
+          content: `Could not apply suggestion: ${error instanceof Error ? error.message : 'unknown error'}`,
+          timestamp: Date.now(),
+        },
+      ])
+    }
   }
 
   const modeInfo = AGENT_MODES[agentMode]

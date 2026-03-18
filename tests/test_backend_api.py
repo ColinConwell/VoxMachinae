@@ -7,6 +7,7 @@ import soundfile as sf
 from fastapi.testclient import TestClient
 
 from voxmachinae.core.audio_io import AudioBuffer
+from voxmachinae.ai.agents.coach import AgentResponse
 from webapp.backend import main
 from webapp.backend.session import EffectNode
 
@@ -155,3 +156,38 @@ def test_separation_options_endpoint_exposes_legacy_backend() -> None:
     payload = response.json()
     assert payload["engines"][0]["engine"] == "demucs_legacy"
     assert "vocals" in payload["engines"][0]["stems"]
+
+
+def test_ai_chat_requires_valid_session() -> None:
+    response = client.post(
+        "/api/ai/chat",
+        json={"session_id": "missing-session", "agent_mode": "coach", "message": "hello"},
+    )
+    assert response.status_code == 404
+
+
+def test_ai_chat_includes_active_effects_context(monkeypatch) -> None:
+    session_id = "session-ai"
+    main.sessions.create(session_id, _make_audio("original"))
+    main.sessions.set_chain(
+        session_id,
+        [
+            EffectNode(id="at-1", effect_type="autotune", enabled=True),
+            EffectNode(id="rv-1", effect_type="reverb", enabled=False),
+            EffectNode(id="dy-1", effect_type="delay", enabled=True),
+        ],
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_chat(*, message, agent_mode, history, audio_context):  # type: ignore[no-untyped-def]
+        captured["effects"] = list(audio_context.active_effects)
+        return AgentResponse(content="ok", suggestions=[], model_used="test")
+
+    monkeypatch.setattr("voxmachinae.ai.agents.coach.chat", fake_chat)
+    response = client.post(
+        "/api/ai/chat",
+        json={"session_id": session_id, "agent_mode": "mixer", "message": "analyze this"},
+    )
+    assert response.status_code == 200
+    assert captured["effects"] == ["autotune", "delay"]

@@ -8,16 +8,19 @@ from __future__ import annotations
 
 import io
 import json
+import logging
+import os
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
 from voxmachinae.core.audio_io import load_audio
 from voxmachinae.core.autotune import AutoTune, AutoTuneParams
@@ -61,12 +64,19 @@ from voxmachinae.utils.samples import (
 )
 
 from webapp.backend.session import SessionManager, EffectNode
+from webapp.backend.task_store import GenerationTaskStore
+from webapp.backend.observability import install_request_id_middleware
+from webapp.backend.integrations import IntegrationRegistry
 
 # Lazy imports for optional AI/generative features
 _generative_clients: dict = {}
 AudioSource = Literal["auto", "original", "processed"]
 
 app = FastAPI(title="VoxMachina", version="0.1.0")
+logger = logging.getLogger(__name__)
+
+project_root = Path(__file__).resolve().parent.parent.parent
+load_dotenv(project_root / ".env.local")
 
 app.add_middleware(
     CORSMiddleware,
@@ -77,6 +87,22 @@ app.add_middleware(
 )
 
 sessions = SessionManager()
+generation_task_store = GenerationTaskStore(
+    path=project_root / ".runtime" / "generation_tasks.json",
+    ttl_seconds=int(os.getenv("GENERATION_TASK_TTL_SECONDS", "7200")),
+)
+integration_registry = IntegrationRegistry()
+install_request_id_middleware(app)
+
+MAX_UPLOAD_BYTES = int(os.getenv("VOXMACHINAE_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
+ALLOWED_UPLOAD_CONTENT_TYPES = {
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mpeg",
+    "audio/flac",
+    "audio/ogg",
+    "application/octet-stream",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -133,19 +159,41 @@ class EffectRequest(BaseModel):
 
 class GenerateRequest(BaseModel):
     engine: str = "suno"  # "suno", "elevenlabs", "stable_audio"
-    prompt: str
+    prompt: str = Field(..., min_length=3, max_length=1000)
     title: str | None = None
     style: str | None = None
     model: str = "v4"
     instrumental: bool = False
-    duration_seconds: float = 30.0
+    duration_seconds: float = Field(default=30.0, ge=5.0, le=240.0)
 
 
 class AIChatRequest(BaseModel):
     session_id: str
     agent_mode: str = "coach"  # "coach", "producer", "mixer"
-    message: str
-    history: list[dict[str, str]] = []
+    message: str = Field(..., min_length=1, max_length=4000)
+    history: list[dict[str, str]] = Field(default_factory=list, max_length=20)
+
+
+class IntegrationConnectRequest(BaseModel):
+    provider: str = Field(..., pattern="^(spotify|tidal)$")
+    session_id: str
+    redirect_uri: str = Field(..., min_length=10)
+
+
+class IntegrationCallbackRequest(BaseModel):
+    state: str
+    code: str
+
+
+class IntegrationRefreshRequest(BaseModel):
+    provider: str = Field(..., pattern="^(spotify|tidal)$")
+    session_id: str
+
+
+class IntegrationImportRequest(BaseModel):
+    provider: str = Field(..., pattern="^(spotify|tidal)$")
+    session_id: str
+    track_id: str
 
 
 class ChainAddRequest(BaseModel):
@@ -216,7 +264,13 @@ def _get_session_audio(session_id: str, source: AudioSource = "auto"):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return {
+        "status": "ok",
+        "version": "0.1.0",
+        "sessions": len(sessions.list_sessions()),
+        "generation_tasks": generation_task_store.stats()["tasks"],
+        "integrations": integration_registry.providers(),
+    }
 
 
 @app.get("/api/separation/options")
@@ -259,12 +313,17 @@ async def list_presets():
 @app.post("/api/upload")
 async def upload_audio(file: UploadFile = File(...)):
     """Upload an audio file and create a session."""
+    if file.content_type and file.content_type not in ALLOWED_UPLOAD_CONTENT_TYPES:
+        raise HTTPException(415, f"Unsupported content type: {file.content_type}")
+
     session_id = str(uuid.uuid4())
 
     # Save to temp file, load as AudioBuffer
     suffix = Path(file.filename or "audio.wav").suffix
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         content = await file.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "Uploaded file exceeds size limit")
         tmp.write(content)
         tmp_path = tmp.name
 
@@ -814,18 +873,12 @@ async def api_generate_test_samples():
 
 def _get_generative_client(engine: str):
     """Lazy-load and cache generative API clients."""
-    import os
-    from dotenv import load_dotenv
-
-    # Load .env.local from project root
-    project_root = Path(__file__).resolve().parent.parent.parent
-    load_dotenv(project_root / ".env.local")
-
     if engine not in _generative_clients:
         if engine == "suno":
             from voxmachinae.ai.generative.kie_suno import create_client
             _generative_clients[engine] = create_client(
                 api_key=os.environ.get("KIE_API_KEY"),
+                callback_url=os.environ.get("KIE_CALLBACK_URL", ""),
             )
         elif engine == "elevenlabs":
             from voxmachinae.ai.generative.elevenlabs_music import create_client
@@ -841,10 +894,6 @@ def _get_generative_client(engine: str):
             raise ValueError(f"Unknown engine: {engine}")
 
     return _generative_clients[engine]
-
-
-# In-memory generation task storage
-_generation_tasks: dict[str, dict] = {}
 
 
 @app.post("/api/generate")
@@ -874,7 +923,7 @@ async def generate_music(req: GenerateRequest):
 
     # For synchronous engines (Stable Audio, ElevenLabs), result is already done
     if result.status.value == "success":
-        _generation_tasks[result.task_id] = {
+        generation_task_store.put(result.task_id, {
             "status": "success",
             "tracks": [
                 {
@@ -888,27 +937,28 @@ async def generate_music(req: GenerateRequest):
                 for t in result.tracks
             ],
             "engine": req.engine,
-        }
+        })
     else:
         # For async engines (Suno), store task for polling
-        _generation_tasks[result.task_id] = {
+        generation_task_store.put(result.task_id, {
             "status": result.status.value,
             "tracks": [],
             "engine": req.engine,
             "error_message": result.error_message,
-        }
+        })
 
+    saved = generation_task_store.get(result.task_id) or {}
     return {
         "task_id": result.task_id,
         "status": result.status.value,
-        "tracks": _generation_tasks[result.task_id]["tracks"],
+        "tracks": saved.get("tracks", []),
     }
 
 
 @app.get("/api/generate/status/{task_id}")
 async def check_generation_status(task_id: str):
     """Poll the status of a music generation task."""
-    task = _generation_tasks.get(task_id)
+    task = generation_task_store.get(task_id)
     if task is None:
         raise HTTPException(404, "Task not found")
 
@@ -922,9 +972,9 @@ async def check_generation_status(task_id: str):
         client = _get_generative_client(engine)
         result = await client.poll_status(task_id)
 
-        task["status"] = result.status.value
+        updates: dict[str, Any] = {"status": result.status.value}
         if result.tracks:
-            task["tracks"] = [
+            updates["tracks"] = [
                 {
                     "track_id": t.track_id,
                     "title": t.title,
@@ -936,11 +986,14 @@ async def check_generation_status(task_id: str):
                 for t in result.tracks
             ]
         if result.error_message:
-            task["error_message"] = result.error_message
+            updates["error_message"] = result.error_message
+        task = generation_task_store.update(task_id, updates) or task
 
     except Exception as exc:
-        task["status"] = "failed"
-        task["error_message"] = str(exc)
+        task = generation_task_store.update(task_id, {
+            "status": "failed",
+            "error_message": str(exc),
+        }) or task
 
     return task
 
@@ -950,7 +1003,7 @@ async def load_generated_track(track_id: str):
     """Load a generated track into a session for processing."""
     # Find the track across all tasks
     track_info = None
-    for task in _generation_tasks.values():
+    for task in generation_task_store.values():
         for t in task.get("tracks", []):
             if t["track_id"] == track_id:
                 track_info = t
@@ -994,6 +1047,94 @@ async def load_generated_track(track_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Versioned Third-Party Integrations (Spotify / TIDAL)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/integrations/providers")
+async def list_integrations():
+    """List configured third-party integration providers."""
+    return {"providers": integration_registry.providers()}
+
+
+@app.post("/api/v1/integrations/connect")
+async def connect_integration(req: IntegrationConnectRequest):
+    """Create an OAuth authorization URL for a provider."""
+    try:
+        payload = integration_registry.issue_authorization_url(
+            provider=req.provider,
+            session_id=req.session_id,
+            redirect_uri=req.redirect_uri,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"provider": req.provider, **payload}
+
+
+@app.post("/api/v1/integrations/callback")
+async def callback_integration(req: IntegrationCallbackRequest):
+    """Exchange OAuth code for access token and store by session."""
+    state = integration_registry.pop_state(req.state)
+    if state is None:
+        raise HTTPException(400, "Invalid or expired OAuth state")
+    try:
+        token = await integration_registry.exchange_code(state=state, code=req.code)
+    except Exception as exc:
+        raise HTTPException(502, f"OAuth exchange failed: {exc}")
+    return {
+        "provider": state.provider,
+        "session_id": state.session_id,
+        "connected": True,
+        "token_type": token.token_type,
+        "expires_in": token.expires_in,
+        "scope": token.scope,
+    }
+
+
+@app.post("/api/v1/integrations/refresh")
+async def refresh_integration(req: IntegrationRefreshRequest):
+    """Refresh an OAuth access token for a session/provider."""
+    try:
+        token = await integration_registry.refresh(provider=req.provider, session_id=req.session_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, f"OAuth refresh failed: {exc}")
+    return {
+        "provider": req.provider,
+        "session_id": req.session_id,
+        "token_type": token.token_type,
+        "expires_in": token.expires_in,
+        "scope": token.scope,
+    }
+
+
+@app.get("/api/v1/integrations/status/{session_id}")
+async def integration_status(session_id: str):
+    """Return integration connection status for a session."""
+    return integration_registry.status(session_id)
+
+
+@app.post("/api/v1/integrations/import")
+async def import_streaming_track(req: IntegrationImportRequest):
+    """Create an async import task placeholder for provider track ingestion."""
+    status = integration_registry.status(req.session_id)
+    if req.provider not in status["connected_providers"]:
+        raise HTTPException(400, f"{req.provider} is not connected for this session")
+
+    task_id = f"import-{uuid.uuid4().hex[:12]}"
+    generation_task_store.put(task_id, {
+        "status": "pending",
+        "engine": f"{req.provider}_import",
+        "tracks": [],
+        "source_track_id": req.track_id,
+        "session_id": req.session_id,
+        "provider": req.provider,
+    })
+    return {"task_id": task_id, "status": "pending"}
+
+
+# ---------------------------------------------------------------------------
 # AI Chat Endpoints
 # ---------------------------------------------------------------------------
 
@@ -1003,31 +1144,34 @@ async def ai_chat(req: AIChatRequest):
     """Send a message to an AI agent and get a response."""
     from voxmachinae.ai.agents.coach import chat, AudioContext
 
+    audio = sessions.get_audio(req.session_id, "original")
+    if audio is None:
+        raise HTTPException(404, "Session not found")
+
     # Build audio context from session if available
     audio_ctx = AudioContext()
-    audio = sessions.get_audio(req.session_id, "original")
-    if audio:
-        audio_ctx.duration = audio.duration
-        audio_ctx.sample_rate = audio.sample_rate
+    audio_ctx.duration = audio.duration
+    audio_ctx.sample_rate = audio.sample_rate
+    audio_ctx.active_effects = [node.effect_type for node in sessions.get_chain(req.session_id) if node.enabled]
 
-        # Try to detect key
-        try:
-            pitch_track = detect_pitch(audio.mono, audio.sample_rate)
-            key_root, key_type, key_conf = detect_key(
-                pitch_track.frequencies, pitch_track.confidences
-            )
-            audio_ctx.detected_key = key_root
-            audio_ctx.detected_scale = key_type
-            audio_ctx.pitch_confidence = key_conf
-        except Exception:
-            pass
+    # Try to detect key
+    try:
+        pitch_track = detect_pitch(audio.mono, audio.sample_rate)
+        key_root, key_type, key_conf = detect_key(
+            pitch_track.frequencies, pitch_track.confidences
+        )
+        audio_ctx.detected_key = key_root
+        audio_ctx.detected_scale = key_type
+        audio_ctx.pitch_confidence = key_conf
+    except Exception:
+        pass
 
     try:
         response = await chat(
             message=req.message,
             agent_mode=req.agent_mode,
             history=req.history or None,
-            audio_context=audio_ctx if audio else None,
+            audio_context=audio_ctx,
         )
     except Exception as exc:
         raise HTTPException(500, f"AI agent error: {exc}")

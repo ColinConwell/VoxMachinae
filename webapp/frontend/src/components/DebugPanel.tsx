@@ -134,7 +134,7 @@ export function DebugPanel() {
       {/* Toggle button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-4 right-4 z-50 flex items-center gap-2.5 glass-card glass-card-hover rounded-full px-4 py-2 text-xs font-medium text-zinc-400 transition-all duration-200"
+        className="fixed bottom-4 right-28 z-50 flex items-center gap-2.5 glass-card glass-card-hover rounded-full px-4 py-2 text-xs font-medium text-zinc-400 transition-all duration-200"
         style={{ fontFamily: 'var(--font-body)' }}
       >
         <span className={`h-2 w-2 rounded-full ${statusDot[healthStatus]}`} />
@@ -148,7 +148,7 @@ export function DebugPanel() {
 
       {/* Panel */}
       {isOpen && (
-        <div className="fixed bottom-14 right-4 z-50 w-[520px] max-h-[60vh] glass-card rounded-2xl shadow-2xl shadow-black/40 flex flex-col overflow-hidden animate-slide-down">
+        <div className="fixed bottom-14 right-28 z-50 w-[520px] max-h-[60vh] glass-card rounded-2xl shadow-2xl shadow-black/40 flex flex-col overflow-hidden animate-slide-down">
           {/* Header */}
           <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3">
             <div className="flex items-center gap-3">

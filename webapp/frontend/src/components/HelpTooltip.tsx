@@ -43,6 +43,16 @@ export function HelpTooltip({
     timeoutRef.current = setTimeout(() => setOpen(false), 150)
   }
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      setOpen((prev) => !prev)
+    }
+    if (event.key === 'Escape') {
+      setOpen(false)
+    }
+  }
+
   const positionClasses: Record<string, string> = {
     top: 'bottom-full left-1/2 -translate-x-1/2 mb-2',
     bottom: 'top-full left-1/2 -translate-x-1/2 mt-2',
@@ -103,9 +113,14 @@ export function HelpTooltip({
                      select-none"
           onMouseEnter={show}
           onMouseLeave={hide}
+          onFocus={show}
+          onBlur={hide}
           onClick={() => setOpen(!open)}
+          onKeyDown={handleKeyDown}
           role="button"
+          tabIndex={0}
           aria-label={`Help: ${label}`}
+          aria-expanded={open}
         >
           ?
           {tooltip}

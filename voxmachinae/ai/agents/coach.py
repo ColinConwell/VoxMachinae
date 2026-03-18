@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+DEFAULT_MODEL = os.environ.get("VOXMACHINAE_LLM_MODEL", "anthropic/claude-sonnet-4-20250514")
+MAX_MESSAGE_CHARS = int(os.environ.get("VOXMACHINAE_AI_MAX_MESSAGE_CHARS", "4000"))
 
 
 SYSTEM_PROMPTS = {
@@ -97,7 +100,7 @@ async def chat(
     agent_mode: str = "coach",
     history: list[dict[str, str]] | None = None,
     audio_context: AudioContext | None = None,
-    model: str = "anthropic/claude-sonnet-4-20250514",
+    model: str | None = None,
 ) -> AgentResponse:
     """Send a message to an AI agent and get a response.
 
@@ -114,6 +117,16 @@ async def chat(
     Returns:
         AgentResponse with the agent's reply and any suggestions.
     """
+    model_name = model or DEFAULT_MODEL
+    cleaned_message = (message or "").strip()
+    if not cleaned_message:
+        return AgentResponse(content="Please send a non-empty message.", model_used="validation")
+    if len(cleaned_message) > MAX_MESSAGE_CHARS:
+        return AgentResponse(
+            content=f"Message is too long. Keep it under {MAX_MESSAGE_CHARS} characters.",
+            model_used="validation",
+        )
+
     system_prompt = SYSTEM_PROMPTS.get(agent_mode, SYSTEM_PROMPTS["coach"])
 
     # Add audio context if available
@@ -131,15 +144,24 @@ async def chat(
     messages = [{"role": "system", "content": system_prompt}]
 
     if history:
-        messages.extend(history[-10:])  # Keep last 10 messages
+        # Keep only last 10 valid turns and enforce chat role allowlist.
+        for item in history[-10:]:
+            role = item.get("role", "")
+            content = item.get("content", "")
+            if role not in {"user", "assistant", "system"}:
+                continue
+            if not isinstance(content, str):
+                continue
+            messages.append({"role": role, "content": content[:MAX_MESSAGE_CHARS]})
 
-    messages.append({"role": "user", "content": message})
+    messages.append({"role": "user", "content": cleaned_message})
 
     try:
         import litellm
 
+        litellm.drop_params = True
         response = await litellm.acompletion(
-            model=model,
+            model=model_name,
             messages=messages,
             max_tokens=1024,
             temperature=0.7,
@@ -154,7 +176,7 @@ async def chat(
         return AgentResponse(
             content=content,
             suggestions=suggestions,
-            model_used=model,
+            model_used=model_name,
             tokens_used=tokens,
         )
 
@@ -178,7 +200,6 @@ def _extract_suggestions(content: str) -> list[dict[str, Any]]:
     Looks for JSON blocks in the response that represent effect parameters.
     """
     import json
-    import re
 
     suggestions = []
 
@@ -189,28 +210,93 @@ def _extract_suggestions(content: str) -> list[dict[str, Any]]:
         try:
             data = json.loads(block)
             if isinstance(data, dict):
+                normalized = _validate_effect_params(data)
+                if normalized is None:
+                    continue
                 # Try to identify the effect type from the keys
                 effect = "unknown"
-                if "retune_speed" in data or "key" in data:
+                if "retune_speed" in normalized or "key" in normalized:
                     effect = "autotune"
-                elif "n_bands" in data or "carrier_type" in data:
+                elif "n_bands" in normalized or "carrier_type" in normalized:
                     effect = "vocoder"
-                elif "room_size" in data or "damping" in data:
+                elif "room_size" in normalized or "damping" in normalized:
                     effect = "reverb"
-                elif "delay_time" in data or "feedback" in data:
+                elif "delay_time" in normalized or "feedback" in normalized:
                     effect = "delay"
-                elif "shift_semitones" in data:
+                elif "shift_semitones" in normalized:
                     effect = "formant"
+                elif "mode" in normalized and normalized.get("mode") in {"noise_reduce", "enhance_speech", "full"}:
+                    effect = "denoise"
 
                 suggestions.append({
                     "label": f"Apply {effect} settings",
                     "effect": effect,
-                    "params": data,
+                    "params": normalized,
                 })
         except json.JSONDecodeError:
             continue
 
     return suggestions
+
+
+def _validate_effect_params(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Allowlist effect parameters and basic value bounds."""
+    allowed: dict[str, type | tuple[type, ...]] = {
+        "key": str,
+        "scale_type": str,
+        "retune_speed": (int, float),
+        "humanize": (int, float),
+        "formant_correction": bool,
+        "flex_tune": (int, float),
+        "transpose": int,
+        "vocoder_type": str,
+        "n_bands": int,
+        "carrier_type": str,
+        "carrier_freq": (int, float),
+        "sibilance": (int, float),
+        "mix": (int, float),
+        "room_size": (int, float),
+        "damping": (int, float),
+        "wet": (int, float),
+        "delay_time": (int, float),
+        "feedback": (int, float),
+        "shift_semitones": (int, float),
+        "mode": str,
+        "stationary": bool,
+        "prop_decrease": (int, float),
+    }
+
+    normalized: dict[str, Any] = {}
+    for key, value in data.items():
+        expected = allowed.get(key)
+        if expected is None:
+            continue
+        if not isinstance(value, expected):
+            continue
+        normalized[key] = value
+
+    if not normalized:
+        return None
+
+    # Clamp a few common numeric ranges.
+    if "wet" in normalized:
+        normalized["wet"] = max(0.0, min(1.0, float(normalized["wet"])))
+    if "mix" in normalized:
+        normalized["mix"] = max(0.0, min(1.0, float(normalized["mix"])))
+    if "room_size" in normalized:
+        normalized["room_size"] = max(0.0, min(1.0, float(normalized["room_size"])))
+    if "damping" in normalized:
+        normalized["damping"] = max(0.0, min(1.0, float(normalized["damping"])))
+    if "feedback" in normalized:
+        normalized["feedback"] = max(0.0, min(0.99, float(normalized["feedback"])))
+    if "retune_speed" in normalized:
+        normalized["retune_speed"] = max(0.0, min(500.0, float(normalized["retune_speed"])))
+    if "n_bands" in normalized:
+        normalized["n_bands"] = max(4, min(64, int(normalized["n_bands"])))
+    if "shift_semitones" in normalized:
+        normalized["shift_semitones"] = max(-24.0, min(24.0, float(normalized["shift_semitones"])))
+
+    return normalized
 
 
 def _fallback_response(message: str, agent_mode: str) -> str:

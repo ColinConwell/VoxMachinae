@@ -40,6 +40,11 @@ VoxMachinae/
 │   │   │   ├── elevenlabs_music.py   # ElevenLabs music generation
 │   │   │   └── stable_audio.py       # Stable Audio generation
 │   │   └── neural/                   # (placeholder for future neural processing)
+│   ├── integrations/
+│   │   ├── base.py                   # Abstract OAuth provider interface
+│   │   ├── spotify.py                # Spotify OAuth client adapter
+│   │   ├── tidal.py                  # TIDAL OAuth client adapter
+│   │   └── __init__.py               # Integration exports
 │   ├── presets/
 │   │   ├── autotune_presets.py        # Curated auto-tune parameter sets
 │   │   └── vocoder_presets.py         # Curated vocoder parameter sets
@@ -51,6 +56,9 @@ VoxMachinae/
 │   ├── backend/
 │   │   ├── main.py                   # FastAPI server (~1000 lines): REST + WebSocket
 │   │   └── session.py                # SessionManager, EffectNode chain management
+│   │   ├── integrations.py           # OAuth orchestration for Spotify/TIDAL providers
+│   │   ├── task_store.py             # Persistent generation/import task store (TTL)
+│   │   └── observability.py          # Request ID and latency middleware
 │   └── frontend/
 │       ├── package.json              # React 19, Tailwind 4, Tone.js, Vite 8
 │       ├── vite.config.ts
@@ -229,6 +237,9 @@ mkdocs build          # → site/
 - **WebSocket audio streaming** uses raw binary frames. The protocol is not formally documented beyond the code — see the `ws_endpoint()` handler in `main.py` and the corresponding frontend `AudioRecorder.tsx`.
 - **CORS is wide open in dev mode** (`allow_origins=["*"]`). This should be restricted for any production deployment.
 - **No authentication.** The web app has no user auth. Sessions are ephemeral and identified by random UUIDs.
+- **Task persistence now exists for generation/import jobs.** Long-running job metadata is stored on disk with TTL via `webapp/backend/task_store.py`, replacing pure in-memory task storage.
+- **Versioned integration routes exist at `/api/v1/integrations/*`.** OAuth connect/callback/refresh/status scaffolding is implemented for Spotify and TIDAL via provider adapters in `voxmachinae/integrations/`.
+- **Request observability middleware is enabled.** `webapp/backend/observability.py` injects `X-Request-ID` and logs per-request latency.
 
 ### Sample Library
 

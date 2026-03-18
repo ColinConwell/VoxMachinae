@@ -67,10 +67,10 @@ const TOUR_STEPS: TourStep[] = [
     icon: '.',
   },
   {
-    target: '[data-tour="export"]',
+    target: null,
     title: 'Export Your Audio',
     body: 'After processing, download your creation as a WAV file. The export button appears once you\'ve applied at least one effect.',
-    placement: 'bottom',
+    placement: 'center',
     accent: 'emerald',
     icon: '.',
   },
@@ -201,7 +201,7 @@ export function GuidedTour({ forceShow, onComplete }: GuidedTourProps) {
   return (
     <div
       ref={overlayRef}
-      className={`fixed inset-0 z-[9999] transition-opacity duration-300 ${
+      className={`fixed inset-0 z-9999 transition-opacity duration-300 ${
         transitioning ? 'opacity-0' : 'opacity-100'
       }`}
       style={{ pointerEvents: 'auto' }}
@@ -363,13 +363,14 @@ export function GuidedTour({ forceShow, onComplete }: GuidedTourProps) {
 
 interface TourTriggerProps {
   onClick: () => void
+  className?: string
 }
 
-export function TourTrigger({ onClick }: TourTriggerProps) {
+export function TourTrigger({ onClick, className = 'bottom-6 right-6' }: TourTriggerProps) {
   return (
     <button
       onClick={onClick}
-      className="fixed bottom-6 right-6 z-50 h-10 w-10 rounded-full glass-card border border-amber-500/20 text-amber-400/70 text-sm font-bold transition-all duration-200 hover:border-amber-500/40 hover:text-amber-400 hover:scale-110 hover:shadow-lg hover:shadow-amber-500/10"
+      className={`fixed ${className} z-50 h-10 w-10 rounded-full glass-card border border-amber-500/20 text-amber-400/70 text-sm font-bold transition-all duration-200 hover:border-amber-500/40 hover:text-amber-400 hover:scale-110 hover:shadow-lg hover:shadow-amber-500/10`}
       style={{ fontFamily: 'var(--font-display)' }}
       title="Replay guided tour"
     >

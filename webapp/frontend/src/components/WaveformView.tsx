@@ -89,7 +89,8 @@ export const WaveformView = memo(function WaveformView({ sessionId, source }: Wa
       <div ref={containerRef} className="cursor-pointer" onClick={toggle} />
       <button
         onClick={toggle}
-        className="absolute bottom-3 right-3 glass-card glass-card-hover rounded-lg px-4 py-1.5 text-xs text-zinc-400 opacity-0 transition-all duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
+        aria-label={`Play or pause ${source} waveform`}
+        className="absolute bottom-3 right-3 glass-card glass-card-hover rounded-lg px-4 py-1.5 text-xs text-zinc-400 opacity-100 transition-all duration-200 group-hover:text-zinc-200 group-focus-within:text-zinc-200"
         style={BODY_FONT_STYLE}
       >
         Play / Pause

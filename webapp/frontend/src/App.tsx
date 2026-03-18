@@ -31,6 +31,13 @@ interface SessionInfo {
 }
 
 type ActivePanel = 'autotune' | 'vocoder' | 'stems' | 'reverb' | 'delay' | 'formant' | 'denoise' | 'generate' | 'ai' | null
+type AISuggestionEffect = 'autotune' | 'vocoder' | 'reverb' | 'delay' | 'formant' | 'denoise'
+
+interface AISuggestion {
+  label: string
+  effect: string
+  params: Record<string, unknown>
+}
 
 function App() {
   const [session, setSession] = useState<SessionInfo | null>(null)
@@ -48,6 +55,34 @@ function App() {
   const handleProcessed = useCallback(() => {
     setProcessedKey((k) => k + 1)
   }, [])
+
+  const handleApplySuggestion = useCallback(
+    async (suggestion: AISuggestion) => {
+      if (!session) {
+        throw new Error('Load audio before applying AI suggestions')
+      }
+      const effect = suggestion.effect as AISuggestionEffect
+      const supportedEffects: AISuggestionEffect[] = ['autotune', 'vocoder', 'reverb', 'delay', 'formant', 'denoise']
+      if (!supportedEffects.includes(effect)) {
+        throw new Error(`Unsupported effect: ${suggestion.effect}`)
+      }
+      const response = await fetch(apiUrl('/api/chain/add'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: session.session_id,
+          effect_type: effect,
+          params: suggestion.params ?? {},
+          label: suggestion.label ?? '',
+        }),
+      })
+      if (!response.ok) {
+        throw new Error(`Failed to add AI suggestion to chain (${response.status})`)
+      }
+      setActivePanel(null)
+    },
+    [session],
+  )
 
   const handleReset = useCallback(async () => {
     if (!session || processedKey === 0) {
@@ -73,6 +108,13 @@ function App() {
 
   return (
     <div className="relative min-h-screen text-zinc-100">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-10000 focus:rounded-md focus:bg-zinc-900 focus:px-3 focus:py-2 focus:text-sm focus:text-zinc-100"
+        style={BODY_FONT_STYLE}
+      >
+        Skip to main content
+      </a>
       <WaveBackground />
 
       {/* Header */}
@@ -92,7 +134,7 @@ function App() {
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto max-w-5xl px-4 sm:px-6 py-6 sm:py-8 space-y-5 sm:space-y-6">
+      <main id="main-content" className="relative z-10 mx-auto max-w-5xl px-4 sm:px-6 py-6 sm:py-8 space-y-5 sm:space-y-6">
         {/* Audio Input Section */}
         <section className="animate-fade-up delay-2" data-tour="audio-input">
           <AudioRecorder onAudioLoaded={handleAudioLoaded} />
@@ -156,9 +198,15 @@ function App() {
             </section>
 
             {/* Effect Selector */}
-            <section className="flex flex-wrap items-center gap-2 sm:gap-3" data-tour="effect-selector">
+            <section className="space-y-3" data-tour="effect-selector">
+              <p className="text-xs text-zinc-500" style={BODY_FONT_STYLE}>
+                Quick edit: open one panel below for focused tweaks. For stacked processing, use the Effects Chain.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <button
                 onClick={() => setActivePanel(activePanel === 'autotune' ? null : 'autotune')}
+                aria-pressed={activePanel === 'autotune'}
+                aria-label="Toggle Auto-Tune panel"
                 className={`group relative rounded-xl px-4 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-semibold transition-all duration-300 ${
                   activePanel === 'autotune'
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 glow-amber'
@@ -170,6 +218,8 @@ function App() {
               </button>
               <button
                 onClick={() => setActivePanel(activePanel === 'vocoder' ? null : 'vocoder')}
+                aria-pressed={activePanel === 'vocoder'}
+                aria-label="Toggle Vocoder panel"
                 className={`group relative rounded-xl px-4 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-semibold transition-all duration-300 ${
                   activePanel === 'vocoder'
                     ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30 glow-violet'
@@ -181,6 +231,8 @@ function App() {
               </button>
               <button
                 onClick={() => setActivePanel(activePanel === 'stems' ? null : 'stems')}
+                aria-pressed={activePanel === 'stems'}
+                aria-label="Toggle Stems panel"
                 className={`group relative rounded-xl px-4 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-semibold transition-all duration-300 ${
                   activePanel === 'stems'
                     ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
@@ -192,6 +244,8 @@ function App() {
               </button>
               <button
                 onClick={() => setActivePanel(activePanel === 'reverb' ? null : 'reverb')}
+                aria-pressed={activePanel === 'reverb'}
+                aria-label="Toggle Reverb panel"
                 className={`group relative rounded-xl px-4 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-semibold transition-all duration-300 ${
                   activePanel === 'reverb'
                     ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 glow-rose'
@@ -203,6 +257,8 @@ function App() {
               </button>
               <button
                 onClick={() => setActivePanel(activePanel === 'delay' ? null : 'delay')}
+                aria-pressed={activePanel === 'delay'}
+                aria-label="Toggle Delay panel"
                 className={`group relative rounded-xl px-4 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-semibold transition-all duration-300 ${
                   activePanel === 'delay'
                     ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 glow-sky'
@@ -214,6 +270,8 @@ function App() {
               </button>
               <button
                 onClick={() => setActivePanel(activePanel === 'formant' ? null : 'formant')}
+                aria-pressed={activePanel === 'formant'}
+                aria-label="Toggle Formant panel"
                 className={`group relative rounded-xl px-4 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-semibold transition-all duration-300 ${
                   activePanel === 'formant'
                     ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30 glow-teal'
@@ -225,6 +283,8 @@ function App() {
               </button>
               <button
                 onClick={() => setActivePanel(activePanel === 'denoise' ? null : 'denoise')}
+                aria-pressed={activePanel === 'denoise'}
+                aria-label="Toggle Denoise panel"
                 className={`group relative rounded-xl px-4 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-semibold transition-all duration-300 ${
                   activePanel === 'denoise'
                     ? 'bg-lime-500/20 text-lime-300 border border-lime-500/30 glow-lime'
@@ -240,6 +300,8 @@ function App() {
 
               <button
                 onClick={() => setActivePanel(activePanel === 'generate' ? null : 'generate')}
+                aria-pressed={activePanel === 'generate'}
+                aria-label="Toggle Generate panel"
                 className={`group relative rounded-xl px-4 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-semibold transition-all duration-300 ${
                   activePanel === 'generate'
                     ? 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 glow-fuchsia'
@@ -251,6 +313,8 @@ function App() {
               </button>
               <button
                 onClick={() => setActivePanel(activePanel === 'ai' ? null : 'ai')}
+                aria-pressed={activePanel === 'ai'}
+                aria-label="Toggle AI panel"
                 className={`group relative rounded-xl px-4 py-2.5 sm:px-6 sm:py-3 text-xs sm:text-sm font-semibold transition-all duration-300 ${
                   activePanel === 'ai'
                     ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 glow-indigo'
@@ -272,6 +336,7 @@ function App() {
                   ↓ Export
                 </a>
               )}
+              </div>
             </section>
 
             {/* Effect Panels */}
@@ -317,12 +382,15 @@ function App() {
             )}
             {activePanel === 'ai' && (
               <section className="animate-slide-down">
-                <AIChatPanel sessionId={session.session_id} />
+                <AIChatPanel sessionId={session.session_id} onApplySuggestion={handleApplySuggestion} />
               </section>
             )}
 
             {/* Effects Chain */}
-            <section data-tour="effects-chain">
+            <section data-tour="effects-chain" className="space-y-2">
+              <p className="text-xs text-zinc-500" style={BODY_FONT_STYLE}>
+                Build pipeline: add multiple effects, reorder them, and process in one pass.
+              </p>
               <EffectsChainPanel sessionId={session.session_id} onProcessed={handleProcessed} />
             </section>
           </div>
@@ -339,7 +407,7 @@ function App() {
         forceShow={showTour}
         onComplete={() => setShowTour(false)}
       />
-      <TourTrigger onClick={() => setShowTour(true)} />
+      <TourTrigger onClick={() => setShowTour(true)} className="bottom-16 right-4" />
     </div>
   )
 }
